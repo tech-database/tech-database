@@ -1,4 +1,7 @@
-import SamplePage from './pages/SamplePage';
+import HomePage from './pages/HomePage';
+import CategoryBrowsePage from './pages/CategoryBrowsePage';
+import FileUploadPage from './pages/FileUploadPage';
+import CategoryManagementPage from './pages/CategoryManagementPage';
 import type { ReactNode } from 'react';
 
 export interface RouteConfig {
@@ -12,9 +15,27 @@ export interface RouteConfig {
 
 export const routes: RouteConfig[] = [
   {
-    name: 'Sample Page',
+    name: '首页',
     path: '/',
-    element: <SamplePage />,
+    element: <HomePage />,
     public: true,
-  }
+  },
+  {
+    name: '分类浏览',
+    path: '/categories',
+    element: <CategoryBrowsePage />,
+    public: true,
+  },
+  {
+    name: '上传文件',
+    path: '/upload',
+    element: <FileUploadPage />,
+    public: true,
+  },
+  {
+    name: '分类管理',
+    path: '/manage',
+    element: <CategoryManagementPage />,
+    public: true,
+  },
 ];
