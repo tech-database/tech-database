@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Search, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -11,20 +11,31 @@ interface SearchBarProps {
 const SearchBar: React.FC<SearchBarProps> = ({ onSearch, placeholder = '搜索文件名称...' }) => {
   const [keyword, setKeyword] = useState('');
 
-  const handleSearch = () => {
+  const handleSearch = useCallback(() => {
     onSearch(keyword.trim());
-  };
+  }, [keyword, onSearch]);
 
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     setKeyword('');
     onSearch('');
-  };
+  }, [onSearch]);
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyPress = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       handleSearch();
     }
-  };
+  }, [handleSearch]);
+
+  // 防抖搜索 - 300ms延迟
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (keyword) {
+        onSearch(keyword.trim());
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [keyword, onSearch]);
 
   return (
     <div className="flex gap-2 w-full max-w-2xl">

@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import MainLayout from '@/components/layouts/MainLayout';
 import { supabase } from '@/db/supabase';
-import type { CategoryLevel1, CategoryLevel2 } from '@/types';
+import type { Category } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -17,11 +17,13 @@ import { useNavigate } from 'react-router-dom';
 import { Upload, Loader2 } from 'lucide-react';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { useForm } from 'react-hook-form';
+import FileUpload from '@/components/dropzone';
+import { buildCategoryTree, buildFlatCategoryList } from '@/lib/categoryUtils';
 
 interface FileUploadFormData {
   name: string;
-  category_level1_id: string;
-  category_level2_id: string;
+  category_id: string;
+  specification?: string;
   image: File | null;
   sourceFile: File | null;
 }
@@ -56,9 +58,14 @@ const compressImage = async (file: File, maxSizeMB = 1): Promise<File> => {
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, width, height);
 
-        // 尝试不同质量直到文件小于1MB
+        // 尝试不同质量直到文件小于1MB（避免无限循环）
         let quality = 0.8;
+        let attempts = 0;
+        const maxAttempts = 8;
+        
         const tryCompress = () => {
+          // 保持原始文件类型，如果是支持的图片类型
+          const fileType = file.type.startsWith('image/') ? file.type : 'image/jpeg';
           canvas.toBlob(
             (blob) => {
               if (!blob) {
@@ -67,18 +74,19 @@ const compressImage = async (file: File, maxSizeMB = 1): Promise<File> => {
               }
 
               const sizeMB = blob.size / 1024 / 1024;
-              if (sizeMB <= maxSizeMB || quality <= 0.1) {
+              if (sizeMB <= maxSizeMB || quality <= 0.1 || attempts >= maxAttempts) {
                 const compressedFile = new File([blob], file.name, {
-                  type: 'image/webp',
+                  type: fileType,
                   lastModified: Date.now(),
                 });
                 resolve(compressedFile);
               } else {
                 quality -= 0.1;
+                attempts++;
                 tryCompress();
               }
             },
-            'image/webp',
+            fileType,
             quality
           );
         };
@@ -105,7 +113,8 @@ const uploadToStorage = async (
     const safeFileName = `${timestamp}_${randomStr}.${ext}`;
     const filePath = `${folder}/${safeFileName}`;
 
-    const { data, error } = await supabase.storage.from(bucketName).upload(filePath, file, {
+    // 让 Supabase 自动处理 MIME 类型
+    const { error } = await supabase.storage.from(bucketName).upload(filePath, file, {
       cacheControl: '3600',
       upsert: false,
     });
@@ -125,75 +134,72 @@ const uploadToStorage = async (
 
 const FileUploadPage: React.FC = () => {
   const navigate = useNavigate();
-  const [categories, setCategories] = useState<CategoryLevel1[]>([]);
-  const [subCategories, setSubCategories] = useState<CategoryLevel2[]>([]);
-  const [filteredSubCategories, setFilteredSubCategories] = useState<CategoryLevel2[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const form = useForm<FileUploadFormData>({
     defaultValues: {
       name: '',
-      category_level1_id: '',
-      category_level2_id: '',
+      category_id: '',
+      specification: '',
       image: null,
       sourceFile: null,
     },
   });
 
-  const selectedLevel1 = form.watch('category_level1_id');
-
   useEffect(() => {
     fetchCategories();
   }, []);
 
-  useEffect(() => {
-    if (selectedLevel1) {
-      const filtered = subCategories.filter((sub) => sub.parent_id === selectedLevel1);
-      setFilteredSubCategories(filtered);
-      form.setValue('category_level2_id', '');
-    } else {
-      setFilteredSubCategories([]);
-    }
-  }, [selectedLevel1, subCategories]);
-
   const fetchCategories = async () => {
     try {
-      const { data: level1Data } = await supabase
-        .from('categories_level1')
+      const { data: categoriesData } = await supabase
+        .from('categories')
         .select('*')
         .order('created_at', { ascending: true });
 
-      const { data: level2Data } = await supabase
-        .from('categories_level2')
-        .select('*')
-        .order('created_at', { ascending: true });
-
-      setCategories(level1Data || []);
-      setSubCategories(level2Data || []);
+      setCategories(categoriesData || []);
     } catch (err) {
       console.error('获取分类失败:', err);
       toast.error('加载分类失败');
     }
   };
 
+  // 构建带层级关系的分类列表
+  const flatCategoryList = useMemo(() => {
+    const categoryTree = buildCategoryTree(categories);
+    return buildFlatCategoryList(categoryTree);
+  }, [categories]);
+
+  // 文件大小限制 (MB)
+  const MAX_IMAGE_SIZE = 10;
+  const MAX_SOURCE_FILE_SIZE = 50;
+
   const onSubmit = async (data: FileUploadFormData) => {
     if (!data.name.trim()) {
       toast.error('请输入文件名称');
       return;
     }
-
-    if (!data.category_level1_id || !data.category_level2_id) {
+    if (!data.category_id) {
       toast.error('请选择分类');
       return;
     }
-
     if (!data.image) {
       toast.error('请上传图片');
       return;
     }
-
     if (!data.sourceFile) {
       toast.error('请上传源文件');
+      return;
+    }
+    
+    // 检查文件大小
+    if (data.image.size > MAX_IMAGE_SIZE * 1024 * 1024) {
+      toast.error(`图片大小不能超过${MAX_IMAGE_SIZE}MB`);
+      return;
+    }
+    if (data.sourceFile.size > MAX_SOURCE_FILE_SIZE * 1024 * 1024) {
+      toast.error(`源文件大小不能超过${MAX_SOURCE_FILE_SIZE}MB`);
       return;
     }
 
@@ -225,13 +231,13 @@ const FileUploadPage: React.FC = () => {
       }
 
       // 保存文件记录
-      const { error: insertError } = await supabase.from('files').insert({
-        name: data.name.trim(),
-        image_url: imageUrl,
-        source_file_url: sourceUrl,
-        category_level1_id: data.category_level1_id,
-        category_level2_id: data.category_level2_id,
-      });
+            const { error: insertError } = await supabase.from('files').insert({
+              name: data.name.trim(),
+              image_url: imageUrl,
+              source_file_url: sourceUrl,
+              category_id: data.category_id,
+              specification: data.specification?.trim() || null,
+            });
 
       if (insertError) throw insertError;
 
@@ -273,22 +279,22 @@ const FileUploadPage: React.FC = () => {
                   )}
                 />
 
-                {/* 一级分类 */}
+                {/* 分类选择 */}
                 <FormField
                   control={form.control}
-                  name="category_level1_id"
-                  rules={{ required: '请选择一级分类' }}
+                  name="category_id"
+                  rules={{ required: '请选择分类' }}
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>一级分类</FormLabel>
+                      <FormLabel>分类</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="请选择一级分类" />
+                            <SelectValue placeholder="请选择分类" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {categories.map((cat) => (
+                          {flatCategoryList.map((cat) => (
                             <SelectItem key={cat.id} value={cat.id}>
                               {cat.name}
                             </SelectItem>
@@ -300,32 +306,16 @@ const FileUploadPage: React.FC = () => {
                   )}
                 />
 
-                {/* 二级分类 */}
+                {/* 规格输入 */}
                 <FormField
                   control={form.control}
-                  name="category_level2_id"
-                  rules={{ required: '请选择二级分类' }}
+                  name="specification"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>二级分类</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        value={field.value}
-                        disabled={!selectedLevel1}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="请先选择一级分类" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {filteredSubCategories.map((cat) => (
-                            <SelectItem key={cat.id} value={cat.id}>
-                              {cat.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <FormLabel>规格 (可选)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="请输入规格信息，如：尺寸、型号等" {...field} />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -336,22 +326,13 @@ const FileUploadPage: React.FC = () => {
                   control={form.control}
                   name="image"
                   rules={{ required: '请上传图片' }}
-                  render={({ field: { onChange, value, ...field } }) => (
-                    <FormItem>
-                      <FormLabel>图片</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0] || null;
-                            onChange(file);
-                          }}
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
+                  render={({ field: { onChange, value } }) => (
+                    <FileUpload
+                      label="图片"
+                      accept="image/*"
+                      value={value}
+                      onChange={onChange}
+                    />
                   )}
                 />
 
@@ -360,21 +341,12 @@ const FileUploadPage: React.FC = () => {
                   control={form.control}
                   name="sourceFile"
                   rules={{ required: '请上传源文件' }}
-                  render={({ field: { onChange, value, ...field } }) => (
-                    <FormItem>
-                      <FormLabel>源文件</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="file"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0] || null;
-                            onChange(file);
-                          }}
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
+                  render={({ field: { onChange, value } }) => (
+                    <FileUpload
+                      label="源文件"
+                      value={value}
+                      onChange={onChange}
+                    />
                   )}
                 />
 

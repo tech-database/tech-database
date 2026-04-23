@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { FileText, Download } from 'lucide-react';
+import { FileText, Download, Trash2, FileImage, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { FileWithCategories } from '@/types';
 import { format } from 'date-fns';
@@ -8,9 +8,14 @@ import { zhCN } from 'date-fns/locale';
 
 interface FileCardProps {
   file: FileWithCategories;
+  onDelete?: (fileId: string) => void;
+  onEdit?: (file: FileWithCategories) => void;
+  isSelected?: boolean;
+  onSelect?: (fileId: string) => void;
 }
 
-const FileCard: React.FC<FileCardProps> = ({ file }) => {
+const FileCard: React.FC<FileCardProps> = ({ file, onDelete, onEdit, isSelected, onSelect }) => {
+  const [imageError, setImageError] = useState(false);
   const formatDate = (dateString: string) => {
     try {
       return format(new Date(dateString), 'yyyy-MM-dd HH:mm', { locale: zhCN });
@@ -20,72 +25,109 @@ const FileCard: React.FC<FileCardProps> = ({ file }) => {
   };
 
   return (
-    <Card className="hover-transition hover:bg-muted overflow-hidden">
+    <Card className={`hover-transition hover:bg-muted overflow-hidden min-w-0 ${isSelected ? 'ring-2 ring-primary' : ''}`}>
       <CardContent className="p-0">
-        {/* 图片区域 */}
-        <div className="relative aspect-video bg-muted">
-          <img
-            src={file.image_url}
-            alt={file.name}
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              const target = e.target as HTMLImageElement;
-              target.style.display = 'none';
-              const parent = target.parentElement;
-              if (parent) {
-                parent.innerHTML = `<div class="w-full h-full flex items-center justify-center bg-muted"><svg class="h-16 w-16 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></div>`;
-              }
-            }}
-          />
+        <div className="relative w-full aspect-square bg-muted">
+          {onSelect && (
+            <div className="absolute top-2 left-2 z-10">
+              <button
+                type="button"
+                className={`w-6 h-6 rounded-full flex items-center justify-center ${isSelected ? 'bg-primary text-white' : 'bg-white/80 text-foreground'}`}
+                onClick={() => onSelect(file.id)}
+              >
+                {isSelected ? '✓' : '○'}
+              </button>
+            </div>
+          )}
+          {imageError ? (
+            <div className="w-full h-full flex items-center justify-center bg-muted">
+              <FileImage className="h-12 w-12 text-muted-foreground" />
+            </div>
+          ) : (
+            <img
+              src={file.image_url}
+              alt={file.name}
+              className="w-full h-full object-contain"
+              onError={() => setImageError(true)}
+              loading="lazy"
+            />
+          )}
         </div>
 
-        {/* 信息区域 */}
-        <div className="p-4 space-y-3">
-          <h3 className="font-semibold text-foreground line-clamp-1">{file.name}</h3>
+        <div className="p-2 lg:p-3 space-y-1.5 lg:space-y-2 min-w-0">
+          <h3 className="font-semibold text-foreground line-clamp-1 text-xs lg:text-sm">{file.name}</h3>
           
-          {/* 分类信息 */}
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="px-2 py-1 bg-secondary rounded">
-              {file.category_level1?.name || '未分类'}
-            </span>
-            <span>/</span>
-            <span className="px-2 py-1 bg-secondary rounded">
-              {file.category_level2?.name || '未分类'}
-            </span>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
+            {file.categoryPath?.map((categoryName, index) => (
+              <React.Fragment key={index}>
+                <span className="px-1.5 py-0.5 bg-secondary rounded truncate">
+                  {categoryName}
+                </span>
+                {index < (file.categoryPath?.length || 0) - 1 && <span>/</span>}
+              </React.Fragment>
+            )) || (
+              <span className="px-1.5 py-0.5 bg-secondary rounded truncate">
+                未分类
+              </span>
+            )}
           </div>
 
-          {/* 时间信息 */}
-          <div className="space-y-1 text-xs text-muted-foreground font-mono-time">
-            <div className="flex items-center justify-between">
-              <span>上传时间:</span>
-              <span>{formatDate(file.created_at)}</span>
+          <div className="space-y-1 text-xs text-muted-foreground">
+            {file.specification && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="shrink-0">规格:</span>
+                <span className="truncate font-medium text-foreground">{file.specification}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-2">
+              <span className="shrink-0">上传时间:</span>
+              <span className="truncate">{formatDate(file.created_at)}</span>
             </div>
-            <div className="flex items-center justify-between">
-              <span>修改时间:</span>
-              <span>{formatDate(file.updated_at)}</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="shrink-0">修改时间:</span>
+              <span className="truncate">{formatDate(file.updated_at)}</span>
             </div>
           </div>
 
-          {/* 操作按钮 */}
-          <div className="flex gap-2 pt-2">
+          <div className="flex gap-1 pt-1 lg:pt-1.5">
+            {onEdit && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs min-w-0"
+                onClick={() => onEdit(file)}
+              >
+                <Edit className="h-3 w-3 shrink-0" />
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
-              className="flex-1"
+              className="flex-1 text-xs min-w-0"
               onClick={() => window.open(file.image_url, '_blank')}
             >
-              <FileText className="h-4 w-4 mr-1" />
-              查看图片
+              <FileText className="h-3 w-3 mr-1 shrink-0" />
+              <span className="truncate">查看图片</span>
             </Button>
             <Button
               variant="default"
               size="sm"
-              className="flex-1"
+              className="flex-1 text-xs min-w-0"
               onClick={() => window.open(file.source_file_url, '_blank')}
             >
-              <Download className="h-4 w-4 mr-1" />
-              下载源文件
+              <Download className="h-3 w-3 mr-1 shrink-0" />
+              <span className="truncate">下载源文件</span>
             </Button>
+            {onDelete && (
+              <Button
+                variant="destructive"
+                size="sm"
+                className="text-xs min-w-0"
+                onClick={() => onDelete(file.id)}
+              >
+                <Trash2 className="h-3 w-3 shrink-0" />
+              </Button>
+            )}
           </div>
         </div>
       </CardContent>

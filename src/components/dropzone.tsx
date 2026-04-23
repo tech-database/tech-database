@@ -1,227 +1,208 @@
-import { cn } from '@/lib/utils'
-import { type UseSupabaseUploadReturn } from '@/hooks/use-supabase-upload'
-import { Button } from '@/components/ui/button'
-import { CheckCircle, File, Loader2, Upload, X } from 'lucide-react'
-import { createContext, type PropsWithChildren, useCallback, useContext } from 'react'
+import React, { useState, useRef } from 'react';
+import { FormControl, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Upload, FileText, X } from 'lucide-react';
+import { toast } from 'sonner';
 
-export const formatBytes = (
-  bytes: number,
-  decimals = 2,
-  size?: 'bytes' | 'KB' | 'MB' | 'GB' | 'TB' | 'PB' | 'EB' | 'ZB' | 'YB'
-) => {
-  const k = 1000
-  const dm = decimals < 0 ? 0 : decimals
-  const sizes = ['bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
-
-  if (bytes === 0 || bytes === undefined) return size !== undefined ? `0 ${size}` : '0 bytes'
-  const i = size !== undefined ? sizes.indexOf(size) : Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]
+interface FileUploadProps {
+  label: string;
+  accept?: string;
+  value: File | null;
+  onChange: (file: File | null) => void;
+  error?: string;
 }
 
-type DropzoneContextType = Omit<UseSupabaseUploadReturn, 'getRootProps' | 'getInputProps'>
+const FileUpload: React.FC<FileUploadProps> = ({
+  label,
+  accept,
+  value,
+  onChange,
+  error,
+}) => {
+  const [isDragging, setIsDragging] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-const DropzoneContext = createContext<DropzoneContextType | undefined>(undefined)
+  // 验证文件类型的辅助函数
+  const validateFileType = (file: File): boolean => {
+    if (!accept) return true;
+    
+    const acceptTypes = accept.split(',').map(type => type.trim());
+    
+    for (const type of acceptTypes) {
+      if (type === '*/*' || type === '*') {
+        return true;
+      } else if (type.endsWith('/*')) {
+        const category = type.slice(0, -2);
+        if (file.type.startsWith(category)) {
+          return true;
+        }
+      } else if (type.startsWith('.')) {
+        const extension = type.toLowerCase();
+        const fileName = file.name.toLowerCase();
+        if (fileName.endsWith(extension)) {
+          return true;
+        }
+      } else if (file.type === type) {
+        return true;
+      }
+    }
+    
+    return false;
+  };
 
-type DropzoneProps = UseSupabaseUploadReturn & {
-  className?: string
-}
+  // Handle drag events
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
 
-const Dropzone = ({
-  className,
-  children,
-  getRootProps,
-  getInputProps,
-  ...restProps
-}: PropsWithChildren<DropzoneProps>) => {
-  const isSuccess = restProps.isSuccess
-  const isActive = restProps.isDragActive
-  const isInvalid =
-    (restProps.isDragActive && restProps.isDragReject) ||
-    (restProps.errors.length > 0 && !restProps.isSuccess) ||
-    restProps.files.some((file) => file.errors.length !== 0)
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      if (!validateFileType(file)) {
+        toast.error(`文件类型不支持，请选择 ${accept} 格式的文件`);
+        return;
+      }
+      onChange(file);
+    }
+  };
+
+  // Handle paste events
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file') {
+        const file = items[i].getAsFile();
+        if (file) {
+          if (!validateFileType(file)) {
+            toast.error(`文件类型不支持，请选择 ${accept} 格式的文件`);
+            return;
+          }
+          onChange(file);
+          break;
+        }
+      }
+    }
+  };
+
+  // Focus container on click (don't open file dialog)
+  const handleContainerClick = () => {
+    containerRef.current?.focus();
+  };
+
+  // Open file dialog only when button is clicked
+  const handleSelectFileClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    fileInputRef.current?.click();
+  };
+
+  // Handle file input change with validation
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (file && !validateFileType(file)) {
+      toast.error(`文件类型不支持，请选择 ${accept} 格式的文件`);
+      // Reset the input
+      e.target.value = '';
+      return;
+    }
+    onChange(file);
+  };
+
+  // Remove file
+  const handleRemoveFile = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onChange(null);
+  };
 
   return (
-    <DropzoneContext.Provider value={{ ...restProps }}>
-      <div
-        {...getRootProps({
-          className: cn(
-            'border-2 border-gray-300 rounded-lg p-6 text-center bg-card transition-colors duration-300 text-foreground',
-            className,
-            isSuccess ? 'border-solid' : 'border-dashed',
-            isActive && 'border-primary bg-primary/10',
-            isInvalid && 'border-destructive bg-destructive/10'
-          ),
-        })}
-      >
-        <input {...getInputProps()} />
-        {children}
-      </div>
-    </DropzoneContext.Provider>
-  )
-}
-const DropzoneContent = ({ className }: { className?: string }) => {
-  const {
-    files,
-    setFiles,
-    onUpload,
-    loading,
-    successes,
-    errors,
-    maxFileSize,
-    maxFiles,
-    isSuccess,
-  } = useDropzoneContext()
+    <FormItem>
+      <FormLabel>{label}</FormLabel>
+      <FormControl>
+        <div
+          ref={containerRef}
+          tabIndex={0}
+          className={`border-2 rounded-lg p-4 transition-all duration-200 outline-none ${isDragging ? 'border-primary bg-primary/5' : isFocused ? 'border-primary' : 'border-border hover:border-primary'}`}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          onPaste={handlePaste}
+          onClick={handleContainerClick}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          style={{ cursor: 'default' }}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={accept}
+            className="hidden"
+            onChange={handleFileInputChange}
+          />
 
-  const exceedMaxFiles = files.length > maxFiles
-
-  const handleRemoveFile = useCallback(
-    (fileName: string) => {
-      setFiles(files.filter((file) => file.name !== fileName))
-    },
-    [files, setFiles]
-  )
-
-  if (isSuccess) {
-    return (
-      <div className={cn('flex flex-row items-center gap-x-2 justify-center', className)}>
-        <CheckCircle size={16} className="text-primary" />
-        <p className="text-primary text-sm">
-          Successfully uploaded {files.length} file{files.length > 1 ? 's' : ''}
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div className={cn('flex flex-col', className)}>
-      {files.map((file, idx) => {
-        const fileError = errors.find((e) => e.name === file.name)
-        const isSuccessfullyUploaded = !!successes.find((e) => e === file.name)
-
-        return (
-          <div
-            key={`${file.name}-${idx}`}
-            className="flex items-center gap-x-4 border-b py-2 first:mt-4 last:mb-4 "
-          >
-            {file.type.startsWith('image/') ? (
-              <div className="h-10 w-10 rounded border overflow-hidden shrink-0 bg-muted flex items-center justify-center">
-                <img src={file.preview} alt={file.name} className="object-cover" />
+          {value ? (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <FileText className="h-5 w-5 text-primary" />
+                <div className="truncate">
+                  <div className="font-medium text-sm">{value.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {(value.size / 1024 / 1024).toFixed(2)} MB
+                  </div>
+                </div>
               </div>
-            ) : (
-              <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center">
-                <File size={18} />
-              </div>
-            )}
-
-            <div className="shrink grow flex flex-col items-start truncate">
-              <p title={file.name} className="text-sm truncate max-w-full">
-                {file.name}
-              </p>
-              {file.errors.length > 0 ? (
-                <p className="text-xs text-destructive">
-                  {file.errors
-                    .map((e) =>
-                      e.message.startsWith('File is larger than')
-                        ? `File is larger than ${formatBytes(maxFileSize, 2)} (Size: ${formatBytes(file.size, 2)})`
-                        : e.message
-                    )
-                    .join(', ')}
-                </p>
-              ) : loading && !isSuccessfullyUploaded ? (
-                <p className="text-xs text-muted-foreground">Uploading file...</p>
-              ) : !!fileError ? (
-                <p className="text-xs text-destructive">Failed to upload: {fileError.message}</p>
-              ) : isSuccessfullyUploaded ? (
-                <p className="text-xs text-primary">Successfully uploaded file</p>
-              ) : (
-                <p className="text-xs text-muted-foreground">{formatBytes(file.size, 2)}</p>
-              )}
-            </div>
-
-            {!loading && !isSuccessfullyUploaded && (
-              <Button
-                size="icon"
-                variant="link"
-                className="shrink-0 justify-self-end text-muted-foreground hover:text-foreground"
-                onClick={() => handleRemoveFile(file.name)}
+              <button
+                type="button"
+                onClick={handleRemoveFile}
+                className="p-1 rounded-full hover:bg-muted transition-colors"
               >
-                <X />
-              </Button>
-            )}
-          </div>
-        )
-      })}
-      {exceedMaxFiles && (
-        <p className="text-sm text-left mt-2 text-destructive">
-          You may upload only up to {maxFiles} files, please remove {files.length - maxFiles} file
-          {files.length - maxFiles > 1 ? 's' : ''}.
-        </p>
-      )}
-      {files.length > 0 && !exceedMaxFiles && (
-        <div className="mt-2">
-          <Button
-            variant="outline"
-            onClick={onUpload}
-            disabled={files.some((file) => file.errors.length !== 0) || loading}
-          >
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Uploading...
-              </>
-            ) : (
-              <>Upload files</>
-            )}
-          </Button>
+                <X className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <Upload className="h-10 w-10 text-muted-foreground mb-3" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium">{isDragging ? '释放文件以上传' : '拖拽文件到此处'}</p>
+                <p className="text-xs text-muted-foreground">
+                  鼠标放此区域，按 Ctrl+V 直接粘贴
+                </p>
+                {accept && (
+                  <p className="text-xs text-muted-foreground">
+                    {accept === 'image/*' ? '支持所有图片格式' : '支持所有文件格式'}
+                  </p>
+                )}
+              </div>
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={handleSelectFileClick}
+                  className="px-4 py-2 text-sm border border-border rounded hover:bg-muted transition-colors"
+                >
+                  选择文件
+                </button>
+              </div>
+            </div>
+          )}
         </div>
-      )}
-    </div>
-  )
-}
+      </FormControl>
+      <FormMessage>{error}</FormMessage>
+    </FormItem>
+  );
+};
 
-const DropzoneEmptyState = ({ className }: { className?: string }) => {
-  const { maxFiles, maxFileSize, inputRef, isSuccess } = useDropzoneContext()
-
-  if (isSuccess) {
-    return null
-  }
-
-  return (
-    <div className={cn('flex flex-col items-center gap-y-2', className)}>
-      <Upload size={20} className="text-muted-foreground" />
-      <p className="text-sm">
-        Upload{!!maxFiles && maxFiles > 1 ? ` ${maxFiles}` : ''} file
-        {!maxFiles || maxFiles > 1 ? 's' : ''}
-      </p>
-      <div className="flex flex-col items-center gap-y-1">
-        <p className="text-xs text-muted-foreground">
-          Drag and drop or{' '}
-          <a
-            onClick={() => inputRef.current?.click()}
-            className="underline cursor-pointer transition hover:text-foreground"
-          >
-            select {maxFiles === 1 ? `file` : 'files'}
-          </a>{' '}
-          to upload
-        </p>
-        {maxFileSize !== Number.POSITIVE_INFINITY && (
-          <p className="text-xs text-muted-foreground">
-            Maximum file size: {formatBytes(maxFileSize, 2)}
-          </p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-const useDropzoneContext = () => {
-  const context = useContext(DropzoneContext)
-
-  if (!context) {
-    throw new Error('useDropzoneContext must be used within a Dropzone')
-  }
-
-  return context
-}
-
-export { Dropzone, DropzoneContent, DropzoneEmptyState, useDropzoneContext }
+export default FileUpload;

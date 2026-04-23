@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import MainLayout from '@/components/layouts/MainLayout';
 import { supabase } from '@/db/supabase';
-import type { CategoryLevel1, CategoryLevel2 } from '@/types';
+import type { Category } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -23,21 +23,20 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { Plus, Trash2, FolderTree } from 'lucide-react';
-import { Separator } from '@/components/ui/separator';
+import { Plus, Trash2, FolderTree, ChevronRight, ChevronDown } from 'lucide-react';
+import { buildCategoryTree, buildFlatCategoryList, getAllCategoryIds } from '@/lib/categoryUtils';
 
 const CategoryManagementPage: React.FC = () => {
-  const [categories, setCategories] = useState<CategoryLevel1[]>([]);
-  const [subCategories, setSubCategories] = useState<CategoryLevel2[]>([]);
-  const [newLevel1Name, setNewLevel1Name] = useState('');
-  const [newLevel2Name, setNewLevel2Name] = useState('');
-  const [selectedParentId, setSelectedParentId] = useState('');
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [allCategories, setAllCategories] = useState<Category[]>([]);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [selectedParentId, setSelectedParentId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{
-    type: 'level1' | 'level2';
     id: string;
     name: string;
   } | null>(null);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchCategories();
@@ -45,86 +44,124 @@ const CategoryManagementPage: React.FC = () => {
 
   const fetchCategories = async () => {
     try {
-      const { data: level1Data } = await supabase
-        .from('categories_level1')
+      const { data: categoriesData, error: categoriesError } = await supabase
+        .from('categories')
         .select('*')
         .order('created_at', { ascending: true });
 
-      const { data: level2Data } = await supabase
-        .from('categories_level2')
-        .select('*')
-        .order('created_at', { ascending: true });
-
-      setCategories(level1Data || []);
-      setSubCategories(level2Data || []);
+      if (categoriesError) {
+        console.error('获取分类失败:', categoriesError);
+        // If categories table doesn't exist, show an error message
+        if (categoriesError.code === '42P01') {
+          toast.error('分类表不存在，请先创建分类表');
+          setCategories([]);
+          setAllCategories([]);
+        } else {
+          toast.error('加载分类失败');
+        }
+      } else {
+        const categories = categoriesData || [];
+        setAllCategories(categories);
+        setCategories(buildCategoryTree(categories));
+      }
     } catch (err) {
       console.error('获取分类失败:', err);
       toast.error('加载分类失败');
     }
   };
 
-  const handleAddLevel1 = async () => {
-    if (!newLevel1Name.trim()) {
-      toast.error('请输入一级分类名称');
+  // 构建带层级关系的分类列表
+  const flatCategoryList = useMemo(() => {
+    return buildFlatCategoryList(categories);
+  }, [categories]);
+
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) {
+      toast.error('请输入分类名称');
       return;
     }
 
     try {
-      const { error } = await supabase
-        .from('categories_level1')
-        .insert({ name: newLevel1Name.trim() });
-
-      if (error) throw error;
-
-      toast.success('一级分类添加成功');
-      setNewLevel1Name('');
-      fetchCategories();
-    } catch (err) {
-      console.error('添加一级分类失败:', err);
-      toast.error('添加失败,请检查分类名称是否重复');
-    }
-  };
-
-  const handleAddLevel2 = async () => {
-    if (!newLevel2Name.trim()) {
-      toast.error('请输入二级分类名称');
-      return;
-    }
-
-    if (!selectedParentId) {
-      toast.error('请选择所属一级分类');
-      return;
-    }
-
-    try {
-      const { error } = await supabase.from('categories_level2').insert({
-        name: newLevel2Name.trim(),
+      const { error } = await supabase.from('categories').insert({
+        name: newCategoryName.trim(),
         parent_id: selectedParentId,
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('添加分类失败:', error);
+        toast.error(`添加失败: ${error.message || '未知错误'}`);
+        return;
+      }
 
-      toast.success('二级分类添加成功');
-      setNewLevel2Name('');
-      setSelectedParentId('');
+      toast.success('分类添加成功');
+      setNewCategoryName('');
+      setSelectedParentId(null);
       fetchCategories();
     } catch (err) {
-      console.error('添加二级分类失败:', err);
-      toast.error('添加失败,请检查分类名称是否重复');
+      console.error('添加分类失败:', err);
+      toast.error('添加失败,请重试');
     }
   };
 
-  const handleDeleteClick = (type: 'level1' | 'level2', id: string, name: string) => {
-    setDeleteTarget({ type, id, name });
+  const handleDeleteClick = (id: string, name: string) => {
+    setDeleteTarget({ id, name });
     setDeleteDialogOpen(true);
+  };
+
+  // 从Storage中删除文件的辅助函数
+  const deleteFileFromStorage = async (fileUrl: string, bucketName: string) => {
+    try {
+      const urlParts = fileUrl.split('/');
+      const uploadsIndex = urlParts.indexOf('uploads');
+      if (uploadsIndex !== -1 && uploadsIndex < urlParts.length - 1) {
+        const filePath = urlParts.slice(uploadsIndex).join('/');
+        
+        const { error } = await supabase.storage
+          .from(bucketName)
+          .remove([filePath]);
+        
+        if (error) console.error('删除Storage文件失败:', error);
+      }
+    } catch (err) {
+      console.error('删除Storage文件时出错:', err);
+    }
   };
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
 
     try {
-      const table = deleteTarget.type === 'level1' ? 'categories_level1' : 'categories_level2';
-      const { error } = await supabase.from(table).delete().eq('id', deleteTarget.id);
+      // 先获取完整的分类树以找到所有子分类
+      const categoryTree = buildCategoryTree(allCategories);
+      const targetCategory = findCategoryById(categoryTree, deleteTarget.id);
+      
+      if (targetCategory) {
+        // 获取所有相关分类ID
+        const allCategoryIds = getAllCategoryIds(targetCategory);
+        
+        // 获取所有相关文件
+        const { data: filesData, error: fetchError } = await supabase
+          .from('files')
+          .select('id, image_url, source_file_url')
+          .in('category_id', allCategoryIds);
+
+        if (fetchError) throw fetchError;
+
+        // 删除Storage中的文件
+        if (filesData) {
+          for (const file of filesData) {
+            if (file.image_url) {
+              await deleteFileFromStorage(file.image_url, 'images');
+            }
+            if (file.source_file_url) {
+              await deleteFileFromStorage(file.source_file_url, 'source_files');
+            }
+          }
+        }
+      }
+
+      // 删除数据库中的分类（会级联删除子分类和文件）
+      const { error } = await supabase.from('categories').delete().eq('id', deleteTarget.id);
 
       if (error) throw error;
 
@@ -139,8 +176,75 @@ const CategoryManagementPage: React.FC = () => {
     }
   };
 
-  const getSubCategoriesForParent = (parentId: string) => {
-    return subCategories.filter((sub) => sub.parent_id === parentId);
+  // 辅助函数：通过ID查找分类
+  const findCategoryById = (categories: Category[], id: string): Category | null => {
+    for (const category of categories) {
+      if (category.id === id) {
+        return category;
+      }
+      if (category.children) {
+        const found = findCategoryById(category.children, id);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  const toggleExpand = (categoryId: string) => {
+    setExpandedCategories((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(categoryId)) {
+        newSet.delete(categoryId);
+      } else {
+        newSet.add(categoryId);
+      }
+      return newSet;
+    });
+  };
+
+  const renderCategory = (category: Category, level: number = 0) => {
+    const isExpanded = expandedCategories.has(category.id);
+    const hasChildren = category.children && category.children.length > 0;
+
+    return (
+      <div key={category.id} className="space-y-2">
+        {/* 分类项 */}
+        <div className="flex items-center justify-between p-3 bg-secondary rounded" style={{ marginLeft: `${level * 20}px` }}>
+          <div className="flex items-center gap-2">
+            {hasChildren && (
+              <button
+                type="button"
+                className="shrink-0"
+                onClick={() => toggleExpand(category.id)}
+              >
+                {isExpanded ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+              </button>
+            )}
+            <span className="font-semibold text-foreground">{category.name}</span>
+          </div>
+          <Button
+            variant="destructive"
+            size="sm"
+            className="min-h-[32px] min-w-[60px] px-4"
+            onClick={() => handleDeleteClick(category.id, category.name)}
+          >
+            <Trash2 className="h-4 w-4 mr-1" />
+            删除
+          </Button>
+        </div>
+
+        {/* 子分类 */}
+        {isExpanded && hasChildren && (
+          <div className="space-y-2">
+            {category.children?.map((child) => renderCategory(child, level + 1))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -148,43 +252,27 @@ const CategoryManagementPage: React.FC = () => {
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <h2 className="text-3xl font-bold text-foreground mb-8">分类管理</h2>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          {/* 添加一级分类 */}
+        <div className="grid grid-cols-1 lg:grid-cols-1 gap-6 mb-8">
+          {/* 添加分类 */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Plus className="h-5 w-5" />
-                添加一级分类
+                添加分类
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Input
-                placeholder="输入一级分类名称"
-                value={newLevel1Name}
-                onChange={(e) => setNewLevel1Name(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleAddLevel1()}
-              />
-              <Button onClick={handleAddLevel1} className="w-full">
-                添加
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* 添加二级分类 */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Plus className="h-5 w-5" />
-                添加二级分类
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Select value={selectedParentId} onValueChange={setSelectedParentId}>
+              <Select 
+                value={selectedParentId || 'root'} 
+                onValueChange={(value) => setSelectedParentId(value === 'root' ? null : value)}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="选择所属一级分类" />
+                  <SelectValue placeholder="选择所属分类（可选，不选则为顶级分类）" />
                 </SelectTrigger>
                 <SelectContent>
-                  {categories.map((cat) => (
+                  {/* 无父分类选项 */}
+                  <SelectItem value="root">顶级分类</SelectItem>
+                  {flatCategoryList.map((cat) => (
                     <SelectItem key={cat.id} value={cat.id}>
                       {cat.name}
                     </SelectItem>
@@ -192,12 +280,12 @@ const CategoryManagementPage: React.FC = () => {
                 </SelectContent>
               </Select>
               <Input
-                placeholder="输入二级分类名称"
-                value={newLevel2Name}
-                onChange={(e) => setNewLevel2Name(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleAddLevel2()}
+                placeholder="输入分类名称"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
               />
-              <Button onClick={handleAddLevel2} className="w-full">
+              <Button onClick={handleAddCategory} className="w-full">
                 添加
               </Button>
             </CardContent>
@@ -214,49 +302,7 @@ const CategoryManagementPage: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {categories.map((category) => {
-                const subs = getSubCategoriesForParent(category.id);
-                return (
-                  <div key={category.id} className="space-y-2">
-                    {/* 一级分类 */}
-                    <div className="flex items-center justify-between p-3 bg-secondary rounded">
-                      <span className="font-semibold text-foreground">{category.name}</span>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => handleDeleteClick('level1', category.id, category.name)}
-                      >
-                        <Trash2 className="h-4 w-4 mr-1" />
-                        删除
-                      </Button>
-                    </div>
-
-                    {/* 二级分类 */}
-                    {subs.length > 0 && (
-                      <div className="ml-6 space-y-2">
-                        {subs.map((sub) => (
-                          <div
-                            key={sub.id}
-                            className="flex items-center justify-between p-2 bg-muted rounded"
-                          >
-                            <span className="text-sm text-foreground">{sub.name}</span>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => handleDeleteClick('level2', sub.id, sub.name)}
-                            >
-                              <Trash2 className="h-4 w-4 mr-1" />
-                              删除
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <Separator />
-                  </div>
-                );
-              })}
+              {categories.map((category) => renderCategory(category))}
 
               {categories.length === 0 && (
                 <div className="text-center py-8 text-muted-foreground">暂无分类</div>
@@ -271,9 +317,7 @@ const CategoryManagementPage: React.FC = () => {
             <AlertDialogHeader>
               <AlertDialogTitle>确认删除</AlertDialogTitle>
               <AlertDialogDescription>
-                {deleteTarget?.type === 'level1'
-                  ? `删除一级分类"${deleteTarget.name}"后,该分类下的所有二级分类及文件将一并删除,是否继续?`
-                  : `删除二级分类"${deleteTarget?.name}"后,该分类下的所有文件将一并删除,是否继续?`}
+                删除分类"{deleteTarget?.name}"后,该分类下的所有子分类及文件将一并删除,是否继续?
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
