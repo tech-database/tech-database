@@ -13,6 +13,8 @@ dist-ssr
 output
 *.local
 package-lock.json
+pnpm-lock.yaml
+yarn.lock
 
 # Environment variables
 .env
