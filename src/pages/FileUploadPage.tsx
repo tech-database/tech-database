@@ -99,6 +99,27 @@ const compressImage = async (file: File, maxSizeMB = 1): Promise<File> => {
   });
 };
 
+// 从Supabase Storage删除文件
+const deleteFileFromStorage = async (fileUrl: string, bucketName: string): Promise<void> => {
+  try {
+    const urlParts = fileUrl.split('/');
+    const uploadsIndex = urlParts.indexOf('uploads');
+    if (uploadsIndex !== -1 && uploadsIndex < urlParts.length - 1) {
+      const filePath = urlParts.slice(uploadsIndex).join('/');
+      
+      const { error } = await supabase.storage
+        .from(bucketName)
+        .remove([filePath]);
+      
+      if (error) {
+        console.error('删除Storage文件失败:', error);
+      }
+    }
+  } catch (err) {
+    console.error('删除Storage文件时出错:', err);
+  }
+};
+
 // 上传文件到Supabase Storage
 const uploadToStorage = async (
   file: File,
@@ -205,6 +226,8 @@ const FileUploadPage: React.FC = () => {
 
     try {
       setSubmitting(true);
+      let imageUrl: string | null = null;
+      let sourceUrl: string | null = null;
 
       // 检查并压缩图片
       let imageToUpload = data.image;
@@ -217,29 +240,36 @@ const FileUploadPage: React.FC = () => {
       }
 
       // 上传图片
-      const imageUrl = await uploadToStorage(imageToUpload, 'images', 'uploads');
+      imageUrl = await uploadToStorage(imageToUpload, 'images', 'uploads');
       if (!imageUrl) {
         toast.error('图片上传失败');
         return;
       }
 
       // 上传源文件
-      const sourceUrl = await uploadToStorage(data.sourceFile, 'source_files', 'uploads');
+      sourceUrl = await uploadToStorage(data.sourceFile, 'source_files', 'uploads');
       if (!sourceUrl) {
         toast.error('源文件上传失败');
+        // 清理已上传的图片
+        await deleteFileFromStorage(imageUrl, 'images');
         return;
       }
 
       // 保存文件记录
-            const { error: insertError } = await supabase.from('files').insert({
-              name: data.name.trim(),
-              image_url: imageUrl,
-              source_file_url: sourceUrl,
-              category_id: data.category_id,
-              specification: data.specification?.trim() || null,
-            });
+      const { error: insertError } = await supabase.from('files').insert({
+        name: data.name.trim(),
+        image_url: imageUrl,
+        source_file_url: sourceUrl,
+        category_id: data.category_id,
+        specification: data.specification?.trim() || null,
+      });
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        // 数据库保存失败，清理已上传的文件
+        await deleteFileFromStorage(imageUrl, 'images');
+        await deleteFileFromStorage(sourceUrl, 'source_files');
+        throw insertError;
+      }
 
       toast.success('文件上传成功');
       navigate('/');

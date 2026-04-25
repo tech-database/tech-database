@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import type { FileWithCategories } from '@/types';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+import { useAdmin } from '@/contexts/AdminContext';
 
 interface FileCardProps {
   file: FileWithCategories;
@@ -15,6 +16,7 @@ interface FileCardProps {
 }
 
 const FileCard: React.FC<FileCardProps> = ({ file, onDelete, onEdit, isSelected, onSelect }) => {
+  const { isAdmin } = useAdmin();
   const [imageError, setImageError] = useState(false);
   const formatDate = (dateString: string) => {
     try {
@@ -90,7 +92,7 @@ const FileCard: React.FC<FileCardProps> = ({ file, onDelete, onEdit, isSelected,
           </div>
 
           <div className="flex gap-1 pt-1 lg:pt-1.5">
-            {onEdit && (
+            {isAdmin && onEdit && (
               <Button
                 variant="outline"
                 size="sm"
@@ -118,7 +120,7 @@ const FileCard: React.FC<FileCardProps> = ({ file, onDelete, onEdit, isSelected,
               <Download className="h-3 w-3 mr-1 shrink-0" />
               <span className="truncate">下载源文件</span>
             </Button>
-            {onDelete && (
+            {isAdmin && onDelete && (
               <Button
                 variant="destructive"
                 size="sm"

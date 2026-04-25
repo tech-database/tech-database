@@ -12,8 +12,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { buildCategoryTree, buildCategoryPath } from '@/lib/categoryUtils';
+import { useAdmin } from '@/contexts/AdminContext';
 
 const CategoryBrowsePage: React.FC = () => {
+  const { isAdmin } = useAdmin();
   const [categories, setCategories] = useState<Category[]>([]);
   const [allCategories, setAllCategories] = useState<Category[]>([]);
   const [files, setFiles] = useState<FileWithCategories[]>([]);
@@ -109,12 +111,9 @@ const CategoryBrowsePage: React.FC = () => {
     setSelectedFiles(new Set());
   };
 
-  // 从Storage中删除文件的辅助函数
   const deleteFileFromStorage = async (fileUrl: string, bucketName: string) => {
     try {
-      // 从URL中提取文件路径
       const urlParts = fileUrl.split('/');
-      // 查找uploads文件夹
       const uploadsIndex = urlParts.indexOf('uploads');
       if (uploadsIndex !== -1 && uploadsIndex < urlParts.length - 1) {
         const filePath = urlParts.slice(uploadsIndex).join('/');
@@ -136,7 +135,6 @@ const CategoryBrowsePage: React.FC = () => {
     }
 
     try {
-      // 先获取文件信息以获取Storage URL
       const { data: fileData, error: fetchError } = await supabase
         .from('files')
         .select('image_url, source_file_url')
@@ -145,7 +143,6 @@ const CategoryBrowsePage: React.FC = () => {
 
       if (fetchError) throw fetchError;
 
-      // 删除Storage中的文件
       if (fileData?.image_url) {
         await deleteFileFromStorage(fileData.image_url, 'images');
       }
@@ -153,7 +150,6 @@ const CategoryBrowsePage: React.FC = () => {
         await deleteFileFromStorage(fileData.source_file_url, 'source_files');
       }
 
-      // 删除数据库记录
       const { error } = await supabase
         .from('files')
         .delete()
@@ -179,15 +175,11 @@ const CategoryBrowsePage: React.FC = () => {
     try {
       const fileIds = Array.from(selectedFiles);
       
-      // 先获取所有文件信息
       const { data: filesData, error: fetchError } = await supabase
         .from('files')
         .select('id, image_url, source_file_url')
         .in('id', fileIds);
 
-      if (fetchError) throw fetchError;
-
-      // 删除Storage中的文件
       if (filesData) {
         for (const file of filesData) {
           if (file.image_url) {
@@ -199,7 +191,6 @@ const CategoryBrowsePage: React.FC = () => {
         }
       }
 
-      // 删除数据库记录
       const { error } = await supabase
         .from('files')
         .delete()
@@ -301,14 +292,13 @@ const CategoryBrowsePage: React.FC = () => {
           </Alert>
         )}
 
-        {/* 搜索框 - 仅在选择分类时显示 */}
         {selectedCategory && (
           <div className="mb-4 lg:mb-6">
             <SearchBar onSearch={handleSearch} />
           </div>
         )}
 
-        {files.length > 0 && (
+        {files.length > 0 && isAdmin && (
           <div className="flex items-center justify-between mb-4 lg:mb-6">
             <Button
               variant="outline"
@@ -371,10 +361,10 @@ const CategoryBrowsePage: React.FC = () => {
               <FileCard
                 key={file.id}
                 file={file}
-                onDelete={handleDeleteFile}
-                onEdit={handleEditFile}
+                onDelete={isAdmin ? handleDeleteFile : undefined}
+                onEdit={isAdmin ? handleEditFile : undefined}
                 isSelected={isSelectMode && selectedFiles.has(file.id)}
-                onSelect={isSelectMode ? handleSelectFile : undefined}
+                onSelect={isSelectMode && isAdmin ? handleSelectFile : undefined}
               />
             ))}
           </div>

@@ -22,4 +22,8 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    host: true, // 监听所有地址，包括IPv4和IPv6
+    port: 5173,
+  },
 });

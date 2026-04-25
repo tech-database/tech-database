@@ -23,7 +23,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { Plus, Trash2, FolderTree, ChevronRight, ChevronDown } from 'lucide-react';
+import { Plus, Trash2, FolderTree, ChevronRight, ChevronDown, Edit, Save, X } from 'lucide-react';
 import { buildCategoryTree, buildFlatCategoryList, getAllCategoryIds } from '@/lib/categoryUtils';
 
 const CategoryManagementPage: React.FC = () => {
@@ -37,6 +37,11 @@ const CategoryManagementPage: React.FC = () => {
     name: string;
   } | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [editingCategory, setEditingCategory] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [editCategoryName, setEditCategoryName] = useState('');
 
   useEffect(() => {
     fetchCategories();
@@ -135,35 +140,55 @@ const CategoryManagementPage: React.FC = () => {
       const categoryTree = buildCategoryTree(allCategories);
       const targetCategory = findCategoryById(categoryTree, deleteTarget.id);
       
+      let filesData: any[] = [];
+      
       if (targetCategory) {
         // 获取所有相关分类ID
         const allCategoryIds = getAllCategoryIds(targetCategory);
         
         // 获取所有相关文件
-        const { data: filesData, error: fetchError } = await supabase
+        const { data: filesResult, error: fetchError } = await supabase
           .from('files')
           .select('id, image_url, source_file_url')
           .in('category_id', allCategoryIds);
 
         if (fetchError) throw fetchError;
 
+        filesData = filesResult || [];
+
         // 删除Storage中的文件
-        if (filesData) {
+        if (filesData.length > 0) {
+          const storageDeleteErrors: string[] = [];
           for (const file of filesData) {
             if (file.image_url) {
-              await deleteFileFromStorage(file.image_url, 'images');
+              try {
+                await deleteFileFromStorage(file.image_url, 'images');
+              } catch (err) {
+                console.error('删除图片失败:', err);
+                storageDeleteErrors.push(`图片: ${file.image_url}`);
+              }
             }
             if (file.source_file_url) {
-              await deleteFileFromStorage(file.source_file_url, 'source_files');
+              try {
+                await deleteFileFromStorage(file.source_file_url, 'source_files');
+              } catch (err) {
+                console.error('删除源文件失败:', err);
+                storageDeleteErrors.push(`源文件: ${file.source_file_url}`);
+              }
             }
+          }
+          
+          // Storage删除有错误，但继续删除数据库
+          if (storageDeleteErrors.length > 0) {
+            console.warn('部分Storage文件删除失败:', storageDeleteErrors);
           }
         }
       }
 
       // 删除数据库中的分类（会级联删除子分类和文件）
-      const { error } = await supabase.from('categories').delete().eq('id', deleteTarget.id);
+      const { error: deleteError } = await supabase.from('categories').delete().eq('id', deleteTarget.id);
 
-      if (error) throw error;
+      if (deleteError) throw deleteError;
 
       toast.success('删除成功');
       fetchCategories();
@@ -173,6 +198,44 @@ const CategoryManagementPage: React.FC = () => {
     } finally {
       setDeleteDialogOpen(false);
       setDeleteTarget(null);
+    }
+  };
+
+  const handleEditClick = (id: string, name: string) => {
+    setEditingCategory({ id, name });
+    setEditCategoryName(name);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingCategory(null);
+    setEditCategoryName('');
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingCategory || !editCategoryName.trim()) {
+      toast.error('请输入分类名称');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('categories')
+        .update({ name: editCategoryName.trim() })
+        .eq('id', editingCategory.id);
+
+      if (error) {
+        console.error('更新分类失败:', error);
+        toast.error(`更新失败: ${error.message || '未知错误'}`);
+        return;
+      }
+
+      toast.success('分类更新成功');
+      setEditingCategory(null);
+      setEditCategoryName('');
+      fetchCategories();
+    } catch (err) {
+      console.error('更新分类失败:', err);
+      toast.error('更新失败,请重试');
     }
   };
 
@@ -205,12 +268,13 @@ const CategoryManagementPage: React.FC = () => {
   const renderCategory = (category: Category, level: number = 0) => {
     const isExpanded = expandedCategories.has(category.id);
     const hasChildren = category.children && category.children.length > 0;
+    const isEditing = editingCategory?.id === category.id;
 
     return (
       <div key={category.id} className="space-y-2">
         {/* 分类项 */}
         <div className="flex items-center justify-between p-3 bg-secondary rounded" style={{ marginLeft: `${level * 20}px` }}>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1">
             {hasChildren && (
               <button
                 type="button"
@@ -224,17 +288,63 @@ const CategoryManagementPage: React.FC = () => {
                 )}
               </button>
             )}
-            <span className="font-semibold text-foreground">{category.name}</span>
+            {isEditing ? (
+              <div className="flex items-center gap-2 flex-1">
+                <Input
+                  value={editCategoryName}
+                  onChange={(e) => setEditCategoryName(e.target.value)}
+                  className="flex-1"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveEdit();
+                    if (e.key === 'Escape') handleCancelEdit();
+                  }}
+                />
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleSaveEdit}
+                  className="shrink-0"
+                >
+                  <Save className="h-4 w-4 mr-1" />
+                  保存
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCancelEdit}
+                  className="shrink-0"
+                >
+                  <X className="h-4 w-4 mr-1" />
+                  取消
+                </Button>
+              </div>
+            ) : (
+              <span className="font-semibold text-foreground">{category.name}</span>
+            )}
           </div>
-          <Button
-            variant="destructive"
-            size="sm"
-            className="min-h-[32px] min-w-[60px] px-4"
-            onClick={() => handleDeleteClick(category.id, category.name)}
-          >
-            <Trash2 className="h-4 w-4 mr-1" />
-            删除
-          </Button>
+          {!isEditing && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-[32px] min-w-[60px] px-4"
+                onClick={() => handleEditClick(category.id, category.name)}
+              >
+                <Edit className="h-4 w-4 mr-1" />
+                编辑
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="min-h-[32px] min-w-[60px] px-4"
+                onClick={() => handleDeleteClick(category.id, category.name)}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                删除
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* 子分类 */}

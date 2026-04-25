@@ -5,28 +5,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Upload, FolderTree, Settings, FileText, Database, ArrowRight, ChevronRight } from 'lucide-react';
 import { supabase } from '@/db/supabase';
-import type { FileWithCategories, Category } from '@/types';
+import type { FileWithCategories } from '@/types';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 
 const HomePage: React.FC = () => {
   const [recentFiles, setRecentFiles] = useState<FileWithCategories[]>([]);
   const [loading, setLoading] = useState(true);
-  const [allCategories, setAllCategories] = useState<Category[]>([]);
 
   useEffect(() => {
     fetchRecentFiles();
-    fetchCategories();
   }, []);
-
-  const fetchCategories = async () => {
-    try {
-      const { data } = await supabase.from('categories').select('*').order('created_at', { ascending: true });
-      setAllCategories(data || []);
-    } catch (err) {
-      console.error('获取分类失败:', err);
-    }
-  };
 
   const fetchRecentFiles = async () => {
     try {
