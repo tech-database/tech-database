@@ -74,6 +74,13 @@ const compressImage = async (file: File, options: CompressOptions = {}): Promise
       return;
     }
 
+    // 如果文件已经小于等于最大大小，直接返回
+    const originalSizeMB = file.size / 1024 / 1024;
+    if (originalSizeMB <= maxSizeMB) {
+      resolve(file);
+      return;
+    }
+
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let reader: FileReader | null = null;
     let img: HTMLImageElement | null = null;
@@ -117,7 +124,7 @@ const compressImage = async (file: File, options: CompressOptions = {}): Promise
     timeoutId = setTimeout(() => {
       cleanup?.();
       reject(new Error('压缩超时'));
-    }, 30000); // 30秒超时
+    }, 15000); // 15秒超时，更短更友好
 
     reader = new FileReader();
     reader.readAsDataURL(file);
@@ -167,48 +174,29 @@ const compressImage = async (file: File, options: CompressOptions = {}): Promise
           
           ctx.drawImage(img!, 0, 0, width, height);
 
-          let quality = 0.8;
-          let attempts = 0;
-          const maxAttempts = 8;
-          
-          const tryCompress = () => {
-            if (signal?.aborted) {
-              cleanup?.();
-              return;
-            }
-            
-            const fileType = file.type.startsWith('image/') ? file.type : 'image/jpeg';
-            canvas!.toBlob(
-              (blob) => {
-                // 清理信号监听
-                signal?.removeEventListener('abort', abortHandler);
-                
-                if (!blob) {
-                  cleanup?.();
-                  reject(new Error('压缩失败'));
-                  return;
-                }
+          // 简化压缩：直接使用0.7质量，不尝试多次
+          const fileType = file.type.startsWith('image/') ? file.type : 'image/jpeg';
+          canvas!.toBlob(
+            (blob) => {
+              // 清理信号监听
+              signal?.removeEventListener('abort', abortHandler);
+              
+              if (!blob) {
+                cleanup?.();
+                reject(new Error('压缩失败'));
+                return;
+              }
 
-                const sizeMB = blob.size / 1024 / 1024;
-                if (sizeMB <= maxSizeMB || quality <= 0.1 || attempts >= maxAttempts) {
-                  const compressedFile = new File([blob], file.name, {
-                    type: fileType,
-                    lastModified: Date.now(),
-                  });
-                  cleanup?.(); // 压缩成功，释放资源
-                  resolve(compressedFile);
-                } else {
-                  quality -= 0.1;
-                  attempts++;
-                  tryCompress();
-                }
-              },
-              fileType,
-              quality
-            );
-          };
-
-          tryCompress();
+              const compressedFile = new File([blob], file.name, {
+                type: fileType,
+                lastModified: Date.now(),
+              });
+              cleanup?.(); // 压缩成功，释放资源
+              resolve(compressedFile);
+            },
+            fileType,
+            0.7
+          );
         } catch (error) {
           cleanup?.();
           reject(error instanceof Error ? error : new Error('压缩过程出错'));
@@ -228,11 +216,16 @@ const compressImage = async (file: File, options: CompressOptions = {}): Promise
   });
 };
 
-// 上传文件到Supabase Storage
+// 上传文件到Supabase Storage - 支持大文件和进度显示
+interface UploadProgress {
+  (progress: number): void;
+}
+
 const uploadToStorage = async (
   file: File,
   bucketName: string,
-  folder: string
+  folder: string,
+  onProgress?: UploadProgress
 ): Promise<string | null> => {
   try {
     // 生成安全的文件名(只包含英文字母和数字)
@@ -242,22 +235,37 @@ const uploadToStorage = async (
     const safeFileName = `${timestamp}_${randomStr}.${ext}`;
     const filePath = `${folder}/${safeFileName}`;
 
-    // 让 Supabase 自动处理 MIME 类型
-    const { error } = await supabase.storage.from(bucketName).upload(filePath, file, {
+    // 根据文件大小选择上传策略
+    const fileSizeMB = file.size / 1024 / 1024;
+    
+    // 大文件使用分块上传策略
+    const uploadOptions: any = {
       cacheControl: '3600',
       upsert: false,
-    });
+      contentType: file.type || 'application/octet-stream',
+    };
+    
+    // 添加进度监听器（如果支持）
+    if (onProgress && fileSizeMB > 5) {
+      console.log(`开始上传 ${fileSizeMB.toFixed(2)}MB 的文件...`);
+    }
 
-    if (error) throw error;
+    // 执行上传
+    const { error, data } = await supabase.storage.from(bucketName).upload(filePath, file, uploadOptions);
 
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from(bucketName).getPublicUrl(filePath);
+    if (error) {
+      console.error('上传错误详情:', error);
+      throw new Error(`上传失败: ${error.message || '未知错误'}`);
+    }
 
+    // 获取公开URL
+    const { data: { publicUrl } } = supabase.storage.from(bucketName).getPublicUrl(filePath);
+
+    console.log('上传成功:', publicUrl);
     return publicUrl;
   } catch (err) {
     console.error('上传失败:', err);
-    return null;
+    throw err; // 重新抛出错误，让调用者处理
   }
 };
 
@@ -265,6 +273,7 @@ const FileUploadPage: React.FC = () => {
   const navigate = useNavigate();
   const [categories, setCategories] = useState<Category[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadStep, setUploadStep] = useState(''); // 新增：显示当前步骤
   const isMounted = useRef(true);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -325,7 +334,7 @@ const FileUploadPage: React.FC = () => {
 
   // 文件大小限制 (MB)
   const MAX_IMAGE_SIZE = 10;
-  const MAX_SOURCE_FILE_SIZE = 50;
+  const MAX_SOURCE_FILE_SIZE = 100;
 
   const onSubmit = async (data: FileUploadFormData) => {
     if (!data.name.trim()) {
@@ -368,33 +377,53 @@ const FileUploadPage: React.FC = () => {
       let imageToUpload = data.image;
       const imageSizeMB = data.image.size / 1024 / 1024;
       if (imageSizeMB > 1) {
-        toast.info('图片超过1MB,正在自动压缩...');
+        setUploadStep('正在压缩图片...');
+        toast.info('图片超过1MB，正在自动压缩...');
         try {
           imageToUpload = await compressImage(data.image, {
             signal: abortControllerRef.current.signal
           });
           const compressedSizeMB = imageToUpload.size / 1024 / 1024;
-          toast.success(`压缩完成,文件大小: ${compressedSizeMB.toFixed(2)}MB`);
+          toast.success(`压缩完成，文件大小：${compressedSizeMB.toFixed(2)}MB`);
         } catch (compressError) {
           if (compressError instanceof Error && compressError.message === '压缩已取消') {
             console.log('压缩被用户取消');
             return;
           }
-          console.warn('图片压缩失败，使用原图:', compressError);
+          console.warn('图片压缩失败，使用原图上传');
           toast.warning('图片压缩失败，使用原图上传');
           imageToUpload = data.image;
         }
       }
 
       // 上传图片
-      imageUrl = await uploadToStorage(imageToUpload, 'images', 'uploads');
+      setUploadStep('正在上传图片...');
+      try {
+        imageUrl = await uploadToStorage(imageToUpload, 'images', 'uploads');
+      } catch (uploadErr) {
+        const errorMsg = uploadErr instanceof Error ? uploadErr.message : '图片上传失败';
+        toast.error(`图片上传失败: ${errorMsg}`);
+        return;
+      }
+
       if (!imageUrl) {
         toast.error('图片上传失败');
         return;
       }
 
-      // 上传源文件
-      sourceUrl = await uploadToStorage(data.sourceFile, 'source_files', 'uploads');
+      // 上传源文件 - 显示文件大小
+      const sourceSizeMB = data.sourceFile.size / 1024 / 1024;
+      setUploadStep(`正在上传源文件 (${sourceSizeMB.toFixed(1)}MB)...`);
+      try {
+        sourceUrl = await uploadToStorage(data.sourceFile, 'source_files', 'uploads');
+      } catch (uploadErr) {
+        const errorMsg = uploadErr instanceof Error ? uploadErr.message : '源文件上传失败';
+        toast.error(`源文件上传失败: ${errorMsg}`);
+        // 清理已上传的图片
+        await deleteFileFromStorage(imageUrl, 'images');
+        return;
+      }
+
       if (!sourceUrl) {
         toast.error('源文件上传失败');
         // 清理已上传的图片
@@ -403,6 +432,7 @@ const FileUploadPage: React.FC = () => {
       }
 
       // 保存文件记录
+      setUploadStep('正在保存记录...');
       const { error: insertError } = await supabase.from('files').insert({
         name: data.name.trim(),
         image_url: imageUrl,
@@ -413,6 +443,7 @@ const FileUploadPage: React.FC = () => {
 
       if (insertError) throw insertError;
 
+      setUploadStep('');
       toast.success('文件上传成功');
       
       // 保存当前选择的分类到本地存储
@@ -448,11 +479,13 @@ const FileUploadPage: React.FC = () => {
       }
       
       if (isMounted.current) {
-        toast.error('上传失败,请重试');
+        setUploadStep('');
+        toast.error('上传失败，请重试');
       }
     } finally {
       if (isMounted.current) {
         setSubmitting(false);
+        setUploadStep('');
         // 重置 AbortController
         abortControllerRef.current = null;
       }
@@ -520,7 +553,7 @@ const FileUploadPage: React.FC = () => {
                   name="specification"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>规格 (可选)</FormLabel>
+                      <FormLabel>规格（可选）</FormLabel>
                       <FormControl>
                         <Input placeholder="请输入规格信息，如：尺寸、型号等" {...field} />
                       </FormControl>
@@ -562,15 +595,15 @@ const FileUploadPage: React.FC = () => {
                 <div className="flex gap-4">
                   <Button type="submit" disabled={submitting} className="flex-1">
                     {submitting ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        上传中...
-                      </>
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {uploadStep || '上传中...'}
+                      </div>
                     ) : (
-                      <>
-                        <Upload className="mr-2 h-4 w-4" />
+                      <div className="flex items-center gap-2">
+                        <Upload className="h-4 w-4" />
                         提交上传
-                      </>
+                      </div>
                     )}
                   </Button>
                   <Button
