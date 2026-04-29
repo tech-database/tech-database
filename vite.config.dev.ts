@@ -1,10 +1,7 @@
 
     import * as vite from 'vite';
     import { defineConfig, loadConfigFromFile } from "vite";
-    import type { Plugin, ConfigEnv } from "vite";
-    import tailwindcss from "tailwindcss";
-    import autoprefixer from "autoprefixer";
-    import fs from "fs/promises";
+    import type { ConfigEnv } from "vite";
     import path from "path";
     import {
       makeTagger,
@@ -48,7 +45,7 @@
 
     // 包装原来的 send 方法
     const _send = server.ws.send;
-    server.ws.send = (payload) => {
+    server.ws.send = (payload: any) => {
       if (hmrEnabled) {
         return _send.call(server.ws, payload);
       } else {
@@ -57,7 +54,7 @@
     };
 
     // 提供接口切换 HMR
-    server.middlewares.use('/innerapi/v1/sourcecode/__hmr_off', (req, res) => {
+    server.middlewares.use('/innerapi/v1/sourcecode/__hmr_off', (_req, res) => {
       hmrEnabled = false;
       let body = {
           status: 0,
@@ -67,7 +64,7 @@
       res.end(JSON.stringify(body));
     });
 
-    server.middlewares.use('/innerapi/v1/sourcecode/__hmr_on', (req, res) => {
+    server.middlewares.use('/innerapi/v1/sourcecode/__hmr_on', (_req, res) => {
       hmrEnabled = true;
       let body = {
           status: 0,
@@ -78,7 +75,7 @@
     });
 
     // 注册一个 HTTP API，用来手动触发一次整体刷新
-    server.middlewares.use('/innerapi/v1/sourcecode/__hmr_reload', (req, res) => {
+    server.middlewares.use('/innerapi/v1/sourcecode/__hmr_reload', (_req, res) => {
       if (hmrEnabled) {
         server.ws.send({
           type: 'full-reload',
