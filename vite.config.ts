@@ -37,11 +37,8 @@ export default defineConfig({
       'edge80',
       'firefox75',
       'safari13',
-      'ios13',
-      'android8'
+      'ios13'
     ],
-    // 优化压缩选项
-    minify: 'terser',
   },
   // 开发服务器配置
   server: {

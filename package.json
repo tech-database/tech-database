@@ -16,8 +16,7 @@
     "Firefox >= 75",
     "Safari >= 13",
     "Edge >= 80",
-    "iOS >= 13",
-    "Android >= 8"
+    "iOS >= 13"
   ],
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
