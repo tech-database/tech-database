@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import MainLayout from '@/components/layouts/MainLayout';
 import { supabase } from '@/db/supabase';
 import type { Category } from '@/types';
@@ -19,6 +19,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { useForm } from 'react-hook-form';
 import FileUpload from '@/components/dropzone';
 import { buildCategoryTree, buildFlatCategoryList } from '@/lib/categoryUtils';
+import { safeStorage } from '@/utils/safeStorage';
 
 interface FileUploadFormData {
   name: string;
@@ -28,79 +29,8 @@ interface FileUploadFormData {
   sourceFile: File | null;
 }
 
-// 图片压缩函数
-const compressImage = async (file: File, maxSizeMB = 1): Promise<File> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
-
-        // 限制最大分辨率为1080p
-        const maxDimension = 1920;
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = (height / width) * maxDimension;
-            width = maxDimension;
-          } else {
-            width = (width / height) * maxDimension;
-            height = maxDimension;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-
-        // 尝试不同质量直到文件小于1MB（避免无限循环）
-        let quality = 0.8;
-        let attempts = 0;
-        const maxAttempts = 8;
-        
-        const tryCompress = () => {
-          // 保持原始文件类型，如果是支持的图片类型
-          const fileType = file.type.startsWith('image/') ? file.type : 'image/jpeg';
-          canvas.toBlob(
-            (blob) => {
-              if (!blob) {
-                reject(new Error('压缩失败'));
-                return;
-              }
-
-              const sizeMB = blob.size / 1024 / 1024;
-              if (sizeMB <= maxSizeMB || quality <= 0.1 || attempts >= maxAttempts) {
-                const compressedFile = new File([blob], file.name, {
-                  type: fileType,
-                  lastModified: Date.now(),
-                });
-                resolve(compressedFile);
-              } else {
-                quality -= 0.1;
-                attempts++;
-                tryCompress();
-              }
-            },
-            fileType,
-            quality
-          );
-        };
-
-        tryCompress();
-      };
-      img.onerror = () => reject(new Error('图片加载失败'));
-    };
-    reader.onerror = () => reject(new Error('文件读取失败'));
-  });
-};
-
-// 从Supabase Storage删除文件
-const deleteFileFromStorage = async (fileUrl: string, bucketName: string): Promise<void> => {
+// 从 Storage 中删除文件的辅助函数
+const deleteFileFromStorage = async (fileUrl: string, bucketName: string) => {
   try {
     const urlParts = fileUrl.split('/');
     const uploadsIndex = urlParts.indexOf('uploads');
@@ -111,13 +41,191 @@ const deleteFileFromStorage = async (fileUrl: string, bucketName: string): Promi
         .from(bucketName)
         .remove([filePath]);
       
-      if (error) {
-        console.error('删除Storage文件失败:', error);
-      }
+      if (error) console.error('删除Storage文件失败:', error);
     }
   } catch (err) {
     console.error('删除Storage文件时出错:', err);
   }
+};
+
+// 图片压缩函数 - 添加完整内存清理和取消机制
+interface CompressOptions {
+  maxSizeMB?: number;
+  signal?: AbortSignal;
+}
+
+const compressImage = async (file: File, options: CompressOptions = {}): Promise<File> => {
+  const { maxSizeMB = 1, signal } = options;
+  
+  // 清理函数 - 释放所有资源
+  let cleanup: (() => void) | null = null;
+  
+  return new Promise((resolve, reject) => {
+    // 检查是否已中止
+    if (signal?.aborted) {
+      reject(new Error('压缩已取消'));
+      return;
+    }
+
+    // 安全检查：文件大小不能超过100MB（防止内存爆炸）
+    const MAX_INPUT_SIZE_MB = 100;
+    if (file.size > MAX_INPUT_SIZE_MB * 1024 * 1024) {
+      reject(new Error(`文件太大，最大支持 ${MAX_INPUT_SIZE_MB}MB`));
+      return;
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let reader: FileReader | null = null;
+    let img: HTMLImageElement | null = null;
+    let canvas: HTMLCanvasElement | null = null;
+    let ctx: CanvasRenderingContext2D | null = null;
+
+    // 资源清理函数
+    cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (reader) {
+        reader.onload = null;
+        reader.onerror = null;
+        reader.abort();
+        reader = null;
+      }
+      if (img) {
+        img.onload = null;
+        img.onerror = null;
+        img.src = '';
+        img = null;
+      }
+      if (canvas) {
+        // 清除 canvas 内容，释放内存
+        canvas.width = 0;
+        canvas.height = 0;
+        canvas = null;
+      }
+      ctx = null;
+    };
+
+    // 监听取消信号
+    const abortHandler = () => {
+      cleanup?.();
+      reject(new Error('压缩已取消'));
+    };
+    signal?.addEventListener('abort', abortHandler);
+
+    timeoutId = setTimeout(() => {
+      cleanup?.();
+      reject(new Error('压缩超时'));
+    }, 30000); // 30秒超时
+
+    reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      if (signal?.aborted) {
+        cleanup?.();
+        return;
+      }
+      
+      img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        if (signal?.aborted) {
+          cleanup?.();
+          return;
+        }
+        
+        canvas = document.createElement('canvas');
+        let width = img!.width;
+        let height = img!.height;
+
+        // 严格限制分辨率，防止内存爆炸
+        const MAX_DIMENSION = 1920;
+        const MAX_PIXELS = 2073600; // 1920x1080
+        const totalPixels = width * height;
+        
+        if (totalPixels > MAX_PIXELS || width > MAX_DIMENSION || height > MAX_DIMENSION) {
+          let scale = Math.min(
+            MAX_DIMENSION / width,
+            MAX_DIMENSION / height,
+            Math.sqrt(MAX_PIXELS / totalPixels)
+          );
+          width = Math.floor(width * scale);
+          height = Math.floor(height * scale);
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        
+        try {
+          ctx = canvas.getContext('2d');
+          if (!ctx) {
+            cleanup?.();
+            reject(new Error('无法获取canvas上下文'));
+            return;
+          }
+          
+          ctx.drawImage(img!, 0, 0, width, height);
+
+          let quality = 0.8;
+          let attempts = 0;
+          const maxAttempts = 8;
+          
+          const tryCompress = () => {
+            if (signal?.aborted) {
+              cleanup?.();
+              return;
+            }
+            
+            const fileType = file.type.startsWith('image/') ? file.type : 'image/jpeg';
+            canvas!.toBlob(
+              (blob) => {
+                // 清理信号监听
+                signal?.removeEventListener('abort', abortHandler);
+                
+                if (!blob) {
+                  cleanup?.();
+                  reject(new Error('压缩失败'));
+                  return;
+                }
+
+                const sizeMB = blob.size / 1024 / 1024;
+                if (sizeMB <= maxSizeMB || quality <= 0.1 || attempts >= maxAttempts) {
+                  const compressedFile = new File([blob], file.name, {
+                    type: fileType,
+                    lastModified: Date.now(),
+                  });
+                  cleanup?.(); // 压缩成功，释放资源
+                  resolve(compressedFile);
+                } else {
+                  quality -= 0.1;
+                  attempts++;
+                  tryCompress();
+                }
+              },
+              fileType,
+              quality
+            );
+          };
+
+          tryCompress();
+        } catch (error) {
+          cleanup?.();
+          reject(error instanceof Error ? error : new Error('压缩过程出错'));
+        }
+      };
+      
+      img.onerror = () => {
+        cleanup?.();
+        reject(new Error('图片加载失败'));
+      };
+    };
+    
+    reader.onerror = () => {
+      cleanup?.();
+      reject(new Error('文件读取失败'));
+    };
+  });
 };
 
 // 上传文件到Supabase Storage
@@ -157,6 +265,8 @@ const FileUploadPage: React.FC = () => {
   const navigate = useNavigate();
   const [categories, setCategories] = useState<Category[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const isMounted = useRef(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const form = useForm<FileUploadFormData>({
     defaultValues: {
@@ -169,7 +279,24 @@ const FileUploadPage: React.FC = () => {
   });
 
   useEffect(() => {
+    isMounted.current = true;
+    
+    // 加载上次保存的分类
+    const savedCategoryId = safeStorage.getItem('last_upload_category');
+    if (savedCategoryId) {
+      form.setValue('category_id', savedCategoryId);
+    }
+    
     fetchCategories();
+    
+    return () => {
+      isMounted.current = false;
+      // 组件卸载时取消正在进行的压缩
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+    };
   }, []);
 
   const fetchCategories = async () => {
@@ -179,10 +306,14 @@ const FileUploadPage: React.FC = () => {
         .select('*')
         .order('created_at', { ascending: true });
 
-      setCategories(categoriesData || []);
+      if (isMounted.current) {
+        setCategories(categoriesData || []);
+      }
     } catch (err) {
       console.error('获取分类失败:', err);
-      toast.error('加载分类失败');
+      if (isMounted.current) {
+        toast.error('加载分类失败');
+      }
     }
   };
 
@@ -224,19 +355,35 @@ const FileUploadPage: React.FC = () => {
       return;
     }
 
+    let imageUrl: string | null = null;
+    let sourceUrl: string | null = null;
+
     try {
       setSubmitting(true);
-      let imageUrl: string | null = null;
-      let sourceUrl: string | null = null;
+      
+      // 创建新的 AbortController
+      abortControllerRef.current = new AbortController();
 
       // 检查并压缩图片
       let imageToUpload = data.image;
       const imageSizeMB = data.image.size / 1024 / 1024;
       if (imageSizeMB > 1) {
         toast.info('图片超过1MB,正在自动压缩...');
-        imageToUpload = await compressImage(data.image);
-        const compressedSizeMB = imageToUpload.size / 1024 / 1024;
-        toast.success(`压缩完成,文件大小: ${compressedSizeMB.toFixed(2)}MB`);
+        try {
+          imageToUpload = await compressImage(data.image, {
+            signal: abortControllerRef.current.signal
+          });
+          const compressedSizeMB = imageToUpload.size / 1024 / 1024;
+          toast.success(`压缩完成,文件大小: ${compressedSizeMB.toFixed(2)}MB`);
+        } catch (compressError) {
+          if (compressError instanceof Error && compressError.message === '压缩已取消') {
+            console.log('压缩被用户取消');
+            return;
+          }
+          console.warn('图片压缩失败，使用原图:', compressError);
+          toast.warning('图片压缩失败，使用原图上传');
+          imageToUpload = data.image;
+        }
       }
 
       // 上传图片
@@ -264,20 +411,51 @@ const FileUploadPage: React.FC = () => {
         specification: data.specification?.trim() || null,
       });
 
-      if (insertError) {
-        // 数据库保存失败，清理已上传的文件
-        await deleteFileFromStorage(imageUrl, 'images');
-        await deleteFileFromStorage(sourceUrl, 'source_files');
-        throw insertError;
-      }
+      if (insertError) throw insertError;
 
       toast.success('文件上传成功');
-      navigate('/');
+      
+      // 保存当前选择的分类到本地存储
+      safeStorage.setItem('last_upload_category', data.category_id);
+      
+      // 重置表单（保留分类），方便继续上传
+      if (isMounted.current) {
+        form.reset({
+          name: '',
+          category_id: data.category_id, // 保留分类
+          specification: '',
+          image: null,
+          sourceFile: null,
+        });
+      }
     } catch (err) {
       console.error('上传失败:', err);
-      toast.error('上传失败,请重试');
+      
+      // 如果有已上传的文件，清理它们
+      if (imageUrl) {
+        try {
+          await deleteFileFromStorage(imageUrl, 'images');
+        } catch (cleanErr) {
+          console.error('清理图片失败:', cleanErr);
+        }
+      }
+      if (sourceUrl) {
+        try {
+          await deleteFileFromStorage(sourceUrl, 'source_files');
+        } catch (cleanErr) {
+          console.error('清理源文件失败:', cleanErr);
+        }
+      }
+      
+      if (isMounted.current) {
+        toast.error('上传失败,请重试');
+      }
     } finally {
-      setSubmitting(false);
+      if (isMounted.current) {
+        setSubmitting(false);
+        // 重置 AbortController
+        abortControllerRef.current = null;
+      }
     }
   };
 

@@ -1,6 +1,6 @@
 import tailwindAnimate from 'tailwindcss-animate';
 import containerQuery from '@tailwindcss/container-queries';
-import intersect from 'tailwindcss-intersect';
+// import intersect from 'tailwindcss-intersect'; // 移除导致 360 浏览器崩溃的插件
 
 export default {
     darkMode: ['class'],
@@ -149,7 +149,7 @@ export default {
     plugins: [
         tailwindAnimate,
         containerQuery,
-        intersect,
+        // intersect, // 移除导致 360 浏览器崩溃的插件
         function ({addUtilities}) {
             addUtilities(
                 {

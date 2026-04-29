@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { adminAuth } from '../utils/adminAuth';
 
 interface AdminContextType {
@@ -19,22 +19,30 @@ export const AdminProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [isAdmin, setIsAdmin] = useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [isPasswordSet, setIsPasswordSet] = useState(false);
+  const isMounted = useRef(true);
 
   useEffect(() => {
+    isMounted.current = true;
     // 初始化时检查管理员状态
     setIsAdmin(adminAuth.isAdminMode());
     // 检查是否已设置密码
     checkPasswordSet();
+
+    return () => {
+      isMounted.current = false;
+    };
   }, []);
 
   const checkPasswordSet = async () => {
     const set = await adminAuth.isPasswordSet();
-    setIsPasswordSet(set);
+    if (isMounted.current) {
+      setIsPasswordSet(set);
+    }
   };
 
   const login = async (password: string): Promise<boolean> => {
     const success = await adminAuth.verifyPassword(password);
-    if (success) {
+    if (success && isMounted.current) {
       setIsAdmin(true);
       adminAuth.setAdminMode(true);
     }
@@ -43,7 +51,7 @@ export const AdminProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const setPassword = async (password: string): Promise<boolean> => {
     const success = await adminAuth.setPassword(password);
-    if (success) {
+    if (success && isMounted.current) {
       setIsAdmin(true);
       adminAuth.setAdminMode(true);
       // 设置密码成功后，重新检查密码状态确保同步
@@ -53,8 +61,10 @@ export const AdminProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const logout = () => {
-    setIsAdmin(false);
-    adminAuth.setAdminMode(false);
+    if (isMounted.current) {
+      setIsAdmin(false);
+      adminAuth.setAdminMode(false);
+    }
   };
 
   return (

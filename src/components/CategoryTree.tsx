@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { ChevronRight, ChevronDown, Folder, FolderOpen } from 'lucide-react';
 import type { Category } from '@/types';
 
@@ -15,7 +15,7 @@ const CategoryTree: React.FC<CategoryTreeProps> = ({
 }) => {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
-  const toggleExpand = (categoryId: string) => {
+  const toggleExpand = useCallback((categoryId: string) => {
     setExpandedCategories((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(categoryId)) {
@@ -25,7 +25,7 @@ const CategoryTree: React.FC<CategoryTreeProps> = ({
       }
       return newSet;
     });
-  };
+  }, []);
 
   const renderCategory = (category: Category, level: number = 0) => {
     const isExpanded = expandedCategories.has(category.id);
@@ -83,11 +83,21 @@ const CategoryTree: React.FC<CategoryTreeProps> = ({
     );
   };
 
+  const memoizedCategories = useMemo(() => categories, [categories]);
+
   return (
     <div className="space-y-1">
-      {categories.map((category) => renderCategory(category))}
+      {memoizedCategories.map((category) => renderCategory(category))}
     </div>
   );
 };
 
-export default CategoryTree;
+const areEqual = (prevProps: CategoryTreeProps, nextProps: CategoryTreeProps) => {
+  return (
+    prevProps.categories === nextProps.categories &&
+    prevProps.selectedCategory === nextProps.selectedCategory &&
+    prevProps.onSelectCategory === nextProps.onSelectCategory
+  );
+};
+
+export default React.memo(CategoryTree, areEqual);

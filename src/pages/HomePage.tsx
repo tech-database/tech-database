@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import MainLayout from '@/components/layouts/MainLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,9 +12,15 @@ import { zhCN } from 'date-fns/locale';
 const HomePage: React.FC = () => {
   const [recentFiles, setRecentFiles] = useState<FileWithCategories[]>([]);
   const [loading, setLoading] = useState(true);
+  const isMounted = useRef(true);
 
   useEffect(() => {
+    isMounted.current = true;
     fetchRecentFiles();
+
+    return () => {
+      isMounted.current = false;
+    };
   }, []);
 
   const fetchRecentFiles = async () => {
@@ -40,11 +46,15 @@ const HomePage: React.FC = () => {
         };
       });
 
-      setRecentFiles(filesWithCategories);
+      if (isMounted.current) {
+        setRecentFiles(filesWithCategories);
+      }
     } catch (err) {
       console.error('获取最近文件失败:', err);
     } finally {
-      setLoading(false);
+      if (isMounted.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -189,7 +199,7 @@ const HomePage: React.FC = () => {
             <Card>
               <CardContent className="p-0">
                 <div className="divide-y divide-slate-200">
-                  {popularCategories.map((category, index) => {
+                  {popularCategories.map((category) => {
                     const Icon = category.icon;
                     return (
                       <Link

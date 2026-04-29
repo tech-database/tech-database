@@ -1,4 +1,5 @@
 import { supabase } from '../db/supabase';
+import { safeStorage } from './safeStorage';
 
 // 简单的密码哈希（生产环境应该用更安全的方法）
 const simpleHash = (password: string): string => {
@@ -83,10 +84,10 @@ export const adminAuth = {
 
   // 本地存储管理员状态
   isAdminMode(): boolean {
-    return localStorage.getItem('adminMode') === 'true';
+    return safeStorage.getBoolean('adminMode', false);
   },
 
   setAdminMode(isAdmin: boolean) {
-    localStorage.setItem('adminMode', isAdmin.toString());
+    safeStorage.setBoolean('adminMode', isAdmin);
   }
 };

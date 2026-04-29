@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { FileText, Download, Trash2, FileImage, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,13 +18,34 @@ interface FileCardProps {
 const FileCard: React.FC<FileCardProps> = ({ file, onDelete, onEdit, isSelected, onSelect }) => {
   const { isAdmin } = useAdmin();
   const [imageError, setImageError] = useState(false);
-  const formatDate = (dateString: string) => {
+
+  const formatDate = useCallback((dateString: string) => {
     try {
       return format(new Date(dateString), 'yyyy-MM-dd HH:mm', { locale: zhCN });
     } catch {
       return dateString;
     }
-  };
+  }, []);
+
+  // 使用useMemo缓存格式化后的日期
+  const formattedCreatedAt = useMemo(() => formatDate(file.created_at), [file.created_at, formatDate]);
+  const formattedUpdatedAt = useMemo(() => formatDate(file.updated_at), [file.updated_at, formatDate]);
+
+  // 使用useMemo缓存分类路径展示
+  const categoryPathDisplay = useMemo(() => {
+    const path = file.categoryPath || [];
+    if (path.length === 0) {
+      return <span className="px-1.5 py-0.5 bg-secondary rounded truncate">未分类</span>;
+    }
+    return path.map((categoryName, index) => (
+      <React.Fragment key={index}>
+        <span className="px-1.5 py-0.5 bg-secondary rounded truncate">
+          {categoryName}
+        </span>
+        {index < path.length - 1 && <span>/</span>}
+      </React.Fragment>
+    ));
+  }, [file.categoryPath]);
 
   return (
     <Card className={`hover-transition hover:bg-muted overflow-hidden min-w-0 ${isSelected ? 'ring-2 ring-primary' : ''}`}>
@@ -52,6 +73,7 @@ const FileCard: React.FC<FileCardProps> = ({ file, onDelete, onEdit, isSelected,
               className="w-full h-full object-contain"
               onError={() => setImageError(true)}
               loading="lazy"
+              decoding="async"
             />
           )}
         </div>
@@ -60,18 +82,7 @@ const FileCard: React.FC<FileCardProps> = ({ file, onDelete, onEdit, isSelected,
           <h3 className="font-semibold text-foreground line-clamp-1 text-xs lg:text-sm">{file.name}</h3>
           
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
-            {file.categoryPath?.map((categoryName, index) => (
-              <React.Fragment key={index}>
-                <span className="px-1.5 py-0.5 bg-secondary rounded truncate">
-                  {categoryName}
-                </span>
-                {index < (file.categoryPath?.length || 0) - 1 && <span>/</span>}
-              </React.Fragment>
-            )) || (
-              <span className="px-1.5 py-0.5 bg-secondary rounded truncate">
-                未分类
-              </span>
-            )}
+            {categoryPathDisplay}
           </div>
 
           <div className="space-y-1 text-xs text-muted-foreground">
@@ -83,11 +94,11 @@ const FileCard: React.FC<FileCardProps> = ({ file, onDelete, onEdit, isSelected,
             )}
             <div className="flex items-center justify-between gap-2">
               <span className="shrink-0">上传时间:</span>
-              <span className="truncate">{formatDate(file.created_at)}</span>
+              <span className="truncate">{formattedCreatedAt}</span>
             </div>
             <div className="flex items-center justify-between gap-2">
               <span className="shrink-0">修改时间:</span>
-              <span className="truncate">{formatDate(file.updated_at)}</span>
+              <span className="truncate">{formattedUpdatedAt}</span>
             </div>
           </div>
 
@@ -137,4 +148,5 @@ const FileCard: React.FC<FileCardProps> = ({ file, onDelete, onEdit, isSelected,
   );
 };
 
-export default FileCard;
+// 使用React.memo优化性能
+export default React.memo(FileCard);

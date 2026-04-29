@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import MainLayout from '@/components/layouts/MainLayout';
 import { supabase } from '@/db/supabase';
 import type { Category } from '@/types';
@@ -37,15 +37,31 @@ const CategoryManagementPage: React.FC = () => {
     name: string;
   } | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
-  const [editingCategory, setEditingCategory] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editCategoryName, setEditCategoryName] = useState('');
+  const isMounted = useRef(true);
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    isMounted.current = true;
     fetchCategories();
+    
+    return () => {
+      isMounted.current = false;
+    };
   }, []);
+
+  // 延迟设置焦点，避免 DOM 更新问题
+  useEffect(() => {
+    if (editingCategory && editInputRef.current) {
+      const timer = setTimeout(() => {
+        if (isMounted.current && editInputRef.current) {
+          editInputRef.current.focus();
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [editingCategory]);
 
   const fetchCategories = async () => {
     try {
@@ -58,20 +74,26 @@ const CategoryManagementPage: React.FC = () => {
         console.error('获取分类失败:', categoriesError);
         // If categories table doesn't exist, show an error message
         if (categoriesError.code === '42P01') {
-          toast.error('分类表不存在，请先创建分类表');
-          setCategories([]);
-          setAllCategories([]);
-        } else {
+          if (isMounted.current) {
+            toast.error('分类表不存在，请先创建分类表');
+            setCategories([]);
+            setAllCategories([]);
+          }
+        } else if (isMounted.current) {
           toast.error('加载分类失败');
         }
       } else {
         const categories = categoriesData || [];
-        setAllCategories(categories);
-        setCategories(buildCategoryTree(categories));
+        if (isMounted.current) {
+          setAllCategories(categories);
+          setCategories(buildCategoryTree(categories));
+        }
       }
     } catch (err) {
       console.error('获取分类失败:', err);
-      toast.error('加载分类失败');
+      if (isMounted.current) {
+        toast.error('加载分类失败');
+      }
     }
   };
 
@@ -94,7 +116,9 @@ const CategoryManagementPage: React.FC = () => {
 
       if (error) {
         console.error('添加分类失败:', error);
-        toast.error(`添加失败: ${error.message || '未知错误'}`);
+        if (isMounted.current) {
+          toast.error(`添加失败: ${error.message || '未知错误'}`);
+        }
         return;
       }
 
@@ -104,7 +128,9 @@ const CategoryManagementPage: React.FC = () => {
       fetchCategories();
     } catch (err) {
       console.error('添加分类失败:', err);
-      toast.error('添加失败,请重试');
+      if (isMounted.current) {
+        toast.error('添加失败,请重试');
+      }
     }
   };
 
@@ -113,7 +139,7 @@ const CategoryManagementPage: React.FC = () => {
     setDeleteDialogOpen(true);
   };
 
-  // 从Storage中删除文件的辅助函数
+  // 从Storage中删除文件的辅助函数 - 修复参数传递
   const deleteFileFromStorage = async (fileUrl: string, bucketName: string) => {
     try {
       const urlParts = fileUrl.split('/');
@@ -190,19 +216,25 @@ const CategoryManagementPage: React.FC = () => {
 
       if (deleteError) throw deleteError;
 
-      toast.success('删除成功');
-      fetchCategories();
+      if (isMounted.current) {
+        toast.success('删除成功');
+        fetchCategories();
+      }
     } catch (err) {
       console.error('删除失败:', err);
-      toast.error('删除失败,请重试');
+      if (isMounted.current) {
+        toast.error('删除失败,请重试');
+      }
     } finally {
-      setDeleteDialogOpen(false);
-      setDeleteTarget(null);
+      if (isMounted.current) {
+        setDeleteDialogOpen(false);
+        setDeleteTarget(null);
+      }
     }
   };
 
   const handleEditClick = (id: string, name: string) => {
-    setEditingCategory({ id, name });
+    setEditingCategory(id);
     setEditCategoryName(name);
   };
 
@@ -221,21 +253,27 @@ const CategoryManagementPage: React.FC = () => {
       const { error } = await supabase
         .from('categories')
         .update({ name: editCategoryName.trim() })
-        .eq('id', editingCategory.id);
+        .eq('id', editingCategory);
 
       if (error) {
         console.error('更新分类失败:', error);
-        toast.error(`更新失败: ${error.message || '未知错误'}`);
+        if (isMounted.current) {
+          toast.error(`更新失败: ${error.message || '未知错误'}`);
+        }
         return;
       }
 
-      toast.success('分类更新成功');
-      setEditingCategory(null);
-      setEditCategoryName('');
-      fetchCategories();
+      if (isMounted.current) {
+        toast.success('分类更新成功');
+        setEditingCategory(null);
+        setEditCategoryName('');
+        fetchCategories();
+      }
     } catch (err) {
       console.error('更新分类失败:', err);
-      toast.error('更新失败,请重试');
+      if (isMounted.current) {
+        toast.error('更新失败,请重试');
+      }
     }
   };
 
@@ -268,7 +306,7 @@ const CategoryManagementPage: React.FC = () => {
   const renderCategory = (category: Category, level: number = 0) => {
     const isExpanded = expandedCategories.has(category.id);
     const hasChildren = category.children && category.children.length > 0;
-    const isEditing = editingCategory?.id === category.id;
+    const isEditing = editingCategory === category.id;
 
     return (
       <div key={category.id} className="space-y-2">
@@ -289,12 +327,13 @@ const CategoryManagementPage: React.FC = () => {
               </button>
             )}
             {isEditing ? (
-              <div className="flex items-center gap-2 flex-1">
+              <div key={`edit-${category.id}`} className="flex items-center gap-2 flex-1">
                 <Input
+                  ref={editInputRef}
+                  id={`edit-input-${category.id}`}
                   value={editCategoryName}
                   onChange={(e) => setEditCategoryName(e.target.value)}
                   className="flex-1"
-                  autoFocus
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleSaveEdit();
                     if (e.key === 'Escape') handleCancelEdit();
@@ -320,7 +359,7 @@ const CategoryManagementPage: React.FC = () => {
                 </Button>
               </div>
             ) : (
-              <span className="font-semibold text-foreground">{category.name}</span>
+              <span key={`view-${category.id}`} className="font-semibold text-foreground">{category.name}</span>
             )}
           </div>
           {!isEditing && (
