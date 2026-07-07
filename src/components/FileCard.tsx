@@ -1,11 +1,11 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
-import { FileText, Download, Trash2, FileImage, Edit } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import type { FileWithCategories } from '@/types';
+import React, { useCallback, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+import { Download, Edit, FileImage, FileText, Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { useAdmin } from '@/contexts/AdminContext';
+import type { FileWithCategories } from '@/types';
 
 interface FileCardProps {
   file: FileWithCategories;
@@ -27,50 +27,36 @@ const FileCard: React.FC<FileCardProps> = ({ file, onDelete, onEdit, isSelected,
     }
   }, []);
 
-  // 使用useMemo缓存格式化后的日期
   const formattedCreatedAt = useMemo(() => formatDate(file.created_at), [file.created_at, formatDate]);
   const formattedUpdatedAt = useMemo(() => formatDate(file.updated_at), [file.updated_at, formatDate]);
-
-  // 使用useMemo缓存分类路径展示
-  const categoryPathDisplay = useMemo(() => {
-    const path = file.categoryPath || [];
-    if (path.length === 0) {
-      return <span className="px-1.5 py-0.5 bg-secondary rounded truncate">未分类</span>;
-    }
-    return path.map((categoryName, index) => (
-      <React.Fragment key={index}>
-        <span className="px-1.5 py-0.5 bg-secondary rounded truncate">
-          {categoryName}
-        </span>
-        {index < path.length - 1 && <span>/</span>}
-      </React.Fragment>
-    ));
-  }, [file.categoryPath]);
+  const categoryPath = file.categoryPath?.length ? file.categoryPath : ['未分类'];
 
   return (
-    <Card className={`hover-transition hover:bg-muted overflow-hidden min-w-0 ${isSelected ? 'ring-2 ring-primary' : ''}`}>
+    <Card className={`float-soft overflow-hidden ${isSelected ? 'ring-2 ring-primary ring-offset-2' : ''}`}>
       <CardContent className="p-0">
-        <div className="relative w-full aspect-square bg-muted">
+        <div className="relative aspect-square w-full bg-gradient-to-br from-cyan-50 via-white to-emerald-50 p-4">
           {onSelect && (
-            <div className="absolute top-2 left-2 z-10">
-              <button
-                type="button"
-                className={`w-6 h-6 rounded-full flex items-center justify-center ${isSelected ? 'bg-primary text-white' : 'bg-white/80 text-foreground'}`}
-                onClick={() => onSelect(file.id)}
-              >
-                {isSelected ? '✓' : '○'}
-              </button>
-            </div>
+            <button
+              type="button"
+              aria-label={isSelected ? '取消选择' : '选择文件'}
+              className={`absolute left-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
+                isSelected ? 'bg-primary text-white' : 'bg-white/90 text-slate-500'
+              }`}
+              onClick={() => onSelect(file.id)}
+            >
+              {isSelected ? '✓' : ''}
+            </button>
           )}
+
           {imageError ? (
-            <div className="w-full h-full flex items-center justify-center bg-muted">
-              <FileImage className="h-12 w-12 text-muted-foreground" />
+            <div className="flex h-full w-full items-center justify-center rounded-[1.25rem] bg-white/70">
+              <FileImage className="h-12 w-12 text-cyan-300" />
             </div>
           ) : (
             <img
               src={file.image_url}
               alt={file.name}
-              className="w-full h-full object-contain"
+              className="h-full w-full object-contain"
               onError={() => setImageError(true)}
               loading="lazy"
               decoding="async"
@@ -78,67 +64,52 @@ const FileCard: React.FC<FileCardProps> = ({ file, onDelete, onEdit, isSelected,
           )}
         </div>
 
-        <div className="p-2 lg:p-3 space-y-1.5 lg:space-y-2 min-w-0">
-          <h3 className="font-semibold text-foreground line-clamp-1 text-xs lg:text-sm">{file.name}</h3>
-          
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
-            {categoryPathDisplay}
+        <div className="space-y-3 p-4">
+          <div>
+            <h3 className="line-clamp-1 text-sm font-bold text-slate-900">{file.name}</h3>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {categoryPath.map((categoryName) => (
+                <span key={categoryName} className="rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-secondary-foreground">
+                  {categoryName}
+                </span>
+              ))}
+            </div>
           </div>
 
-          <div className="space-y-1 text-xs text-muted-foreground">
+          <div className="space-y-1.5 rounded-[1rem] bg-white/65 p-3 text-xs text-slate-500">
             {file.specification && (
               <div className="flex items-center justify-between gap-2">
-                <span className="shrink-0">规格:</span>
-                <span className="truncate font-medium text-foreground">{file.specification}</span>
+                <span>规格</span>
+                <span className="truncate font-semibold text-slate-800">{file.specification}</span>
               </div>
             )}
             <div className="flex items-center justify-between gap-2">
-              <span className="shrink-0">上传时间:</span>
+              <span>上传时间</span>
               <span className="truncate">{formattedCreatedAt}</span>
             </div>
             <div className="flex items-center justify-between gap-2">
-              <span className="shrink-0">修改时间:</span>
+              <span>修改时间</span>
               <span className="truncate">{formattedUpdatedAt}</span>
             </div>
           </div>
 
-          <div className="flex gap-1 pt-1 lg:pt-1.5">
+          <div className="flex gap-1.5">
             {isAdmin && onEdit && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs min-w-0"
-                onClick={() => onEdit(file)}
-              >
-                <Edit className="h-3 w-3 shrink-0" />
+              <Button variant="outline" size="sm" onClick={() => onEdit(file)}>
+                <Edit className="h-3.5 w-3.5" />
               </Button>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1 text-xs min-w-0"
-              onClick={() => window.open(file.image_url, '_blank')}
-            >
-              <FileText className="h-3 w-3 mr-1 shrink-0" />
-              <span className="truncate">查看图片</span>
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => window.open(file.image_url, '_blank')}>
+              <FileText className="h-3.5 w-3.5" />
+              图片
             </Button>
-            <Button
-              variant="default"
-              size="sm"
-              className="flex-1 text-xs min-w-0"
-              onClick={() => window.open(file.source_file_url, '_blank')}
-            >
-              <Download className="h-3 w-3 mr-1 shrink-0" />
-              <span className="truncate">下载源文件</span>
+            <Button size="sm" className="flex-1" onClick={() => window.open(file.source_file_url, '_blank')}>
+              <Download className="h-3.5 w-3.5" />
+              下载
             </Button>
             {isAdmin && onDelete && (
-              <Button
-                variant="destructive"
-                size="sm"
-                className="text-xs min-w-0"
-                onClick={() => onDelete(file.id)}
-              >
-                <Trash2 className="h-3 w-3 shrink-0" />
+              <Button variant="destructive" size="sm" onClick={() => onDelete(file.id)}>
+                <Trash2 className="h-3.5 w-3.5" />
               </Button>
             )}
           </div>
@@ -148,5 +119,4 @@ const FileCard: React.FC<FileCardProps> = ({ file, onDelete, onEdit, isSelected,
   );
 };
 
-// 使用React.memo优化性能
 export default React.memo(FileCard);

@@ -36,10 +36,10 @@ const CategoryTree: React.FC<CategoryTreeProps> = ({
       <div key={category.id}>
         {/* 分类项 */}
         <div
-          className={`flex items-center gap-2 px-3 py-2 rounded cursor-pointer hover-transition ${
+          className={`hover-transition flex cursor-pointer items-center gap-2 rounded-full px-3 py-2.5 ${
             isSelected
-              ? 'bg-primary text-primary-foreground'
-              : 'hover:bg-muted'
+              ? 'bg-primary text-primary-foreground shadow-[0_8px_18px_rgb(20_184_166/0.18)]'
+              : 'text-slate-600 hover:bg-white/80 hover:text-slate-900'
           }`}
           style={{ paddingLeft: `${3 + level * 18}px` }}
           onClick={(e) => {
@@ -67,9 +67,11 @@ const CategoryTree: React.FC<CategoryTreeProps> = ({
           ) : (
             <Folder className="h-4 w-4 shrink-0" />
           )}
-          <span className="text-sm font-medium">{category.name}</span>
+          <span className="truncate text-sm font-semibold">{category.name}</span>
           {hasChildren && (
-            <span className="ml-auto text-xs text-muted-foreground">({category.children?.length || 0})</span>
+            <span className={`ml-auto rounded-full px-2 py-0.5 text-xs ${isSelected ? 'bg-white/20 text-white' : 'bg-cyan-50 text-cyan-700'}`}>
+              {category.children?.length || 0}
+            </span>
           )}
         </div>
 

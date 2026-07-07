@@ -1,31 +1,30 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, FolderTree, Upload, Settings, Menu, Shield, LogOut } from 'lucide-react';
+import { FolderTree, Home, LogOut, Menu, Settings, Shield, Upload } from 'lucide-react';
+import { toast } from 'sonner';
+import { AdminPasswordDialog } from '@/components/AdminPasswordDialog';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useAdmin } from '@/contexts/AdminContext';
-import { AdminPasswordDialog } from '@/components/AdminPasswordDialog';
-import { toast } from 'sonner';
 
 interface MainLayoutProps {
   children: React.ReactNode;
   sidebarContent?: React.ReactNode;
 }
 
+const navItems = [
+  { name: '首页', path: '/', icon: Home },
+  { name: '分类浏览', path: '/categories', icon: FolderTree },
+];
+
+const actionItems = [
+  { name: '上传文件', path: '/upload', icon: Upload },
+  { name: '分类管理', path: '/manage', icon: Settings },
+];
+
 const MainLayout: React.FC<MainLayoutProps> = ({ children, sidebarContent }) => {
   const location = useLocation();
   const { isAdmin, setShowPasswordDialog, logout } = useAdmin();
-
-  const navItems = [
-    { name: '首页', path: '/', icon: Home },
-    { name: '分类浏览', path: '/categories', icon: FolderTree },
-  ];
-
-  const actionItems = [
-    { name: '上传文件', path: '/upload', icon: Upload },
-    { name: '分类管理', path: '/manage', icon: Settings },
-  ];
-
   const isActive = (path: string) => location.pathname === path;
 
   const handleLogout = () => {
@@ -33,148 +32,108 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children, sidebarContent }) => 
     toast.success('已退出管理员模式');
   };
 
-  const NavLinks = () => (
+  const renderLinks = (items: typeof navItems) => (
     <>
-      {navItems.map((item) => {
+      {items.map((item) => {
         const Icon = item.icon;
         const active = isActive(item.path);
         return (
           <Link
             key={item.path}
             to={item.path}
-            className={`flex items-center gap-3 px-4 py-3 rounded transition-colors ${
+            className={`group flex items-center gap-3 rounded-full px-4 py-3 text-sm font-semibold transition-all ${
               active
-                ? 'bg-primary text-primary-foreground'
-                : 'text-foreground hover:bg-muted'
+                ? 'bg-primary text-primary-foreground shadow-[0_8px_18px_rgb(20_184_166/0.22)]'
+                : 'text-slate-600 hover:bg-white/80 hover:text-slate-900'
             }`}
           >
             <Icon className="h-5 w-5 shrink-0" />
-            <span className="text-sm font-medium">{item.name}</span>
+            <span>{item.name}</span>
           </Link>
         );
       })}
     </>
   );
 
-  const ActionLinks = () => (
-    <>
-      {isAdmin && actionItems.map((item) => {
-        const Icon = item.icon;
-        const active = isActive(item.path);
-        return (
-          <Link
-            key={item.path}
-            to={item.path}
-            className={`flex items-center gap-3 px-4 py-3 rounded transition-colors ${
-              active
-                ? 'bg-primary text-primary-foreground'
-                : 'text-foreground hover:bg-muted'
-            }`}
-          >
-            <Icon className="h-5 w-5 shrink-0" />
-            <span className="text-sm font-medium">{item.name}</span>
-          </Link>
-        );
-      })}
-    </>
+  const adminButton = (
+    <Button
+      variant={isAdmin ? 'default' : 'outline'}
+      size="sm"
+      onClick={isAdmin ? handleLogout : () => setShowPasswordDialog(true)}
+      className="admin-button shrink-0"
+    >
+      {isAdmin ? (
+        <>
+          <LogOut className="h-4 w-4" />
+          退出
+        </>
+      ) : (
+        <>
+          <Shield className="h-4 w-4" />
+          管理员
+        </>
+      )}
+    </Button>
   );
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    <div className="pastel-shell flex h-screen w-full overflow-hidden">
       <AdminPasswordDialog />
-      {/* 桌面端侧边栏 */}
-      <aside className="hidden lg:flex lg:flex-col shrink-0 border-r border-border bg-card w-80">
-        <div className="flex flex-col h-full">
-          <div className="p-6 border-b border-border shrink-0 flex items-center justify-between">
-            <h1 className="text-xl font-bold text-foreground truncate">中泰家具集团</h1>
-            <Button
-              variant={isAdmin ? "default" : "outline"}
-              size="sm"
-              onClick={isAdmin ? handleLogout : () => setShowPasswordDialog(true)}
-              className="shrink-0"
-            >
-              {isAdmin ? (
-                <>
-                  <Shield className="h-4 w-4 mr-1" />
-                  <LogOut className="h-4 w-4 mr-1" />
-                  退出
-                </>
-              ) : (
-                <>
-                  <Shield className="h-4 w-4 mr-1" />
-                  管理员
-                </>
-              )}
-            </Button>
+
+      <aside className="hidden w-80 shrink-0 p-4 lg:flex lg:flex-col">
+        <div className="soft-surface flex h-full flex-col overflow-hidden rounded-[1.75rem]">
+          <div className="shrink-0 border-b border-white/70 p-5">
+            <div className="mb-5 space-y-4">
+              <Link to="/" className="block min-w-0">
+                <h1 className="truncate text-xl font-bold text-slate-900">中泰家具集团</h1>
+              </Link>
+              <div className="flex justify-start">{adminButton}</div>
+            </div>
           </div>
-          {/* 操作按钮 - 仅管理员可见 */}
+
           {isAdmin && (
-            <nav className="p-4 space-y-2 shrink-0 border-b border-border">
-              <ActionLinks />
+            <nav className="space-y-2 border-b border-white/70 p-4">
+              {renderLinks(actionItems)}
             </nav>
           )}
-          {/* 导航菜单 */}
-          <nav className="p-4 space-y-2 shrink-0">
-            <NavLinks />
-          </nav>
+
+          <nav className="space-y-2 p-4">{renderLinks(navItems)}</nav>
+
           {sidebarContent && (
-            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 border-t border-border min-h-0">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden border-t border-white/70 p-4">
               {sidebarContent}
             </div>
           )}
         </div>
       </aside>
 
-      {/* 移动端导航 */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-card border-b border-border">
+      <div className="fixed inset-x-0 top-0 z-50 border-b border-white/70 bg-white/85 backdrop-blur-xl lg:hidden">
         <div className="flex items-center justify-between p-4">
-          <h1 className="text-lg font-bold text-foreground">中泰家具集团</h1>
+          <Link to="/" className="min-w-0">
+            <h1 className="truncate text-lg font-bold text-slate-900">中泰家具集团</h1>
+          </Link>
           <div className="flex items-center gap-2">
-            <Button
-              variant={isAdmin ? "default" : "outline"}
-              size="sm"
-              onClick={isAdmin ? handleLogout : () => setShowPasswordDialog(true)}
-            >
-              {isAdmin ? (
-                <>
-                  <LogOut className="h-4 w-4 mr-1" />
-                  退出
-                </>
-              ) : (
-                <>
-                  <Shield className="h-4 w-4 mr-1" />
-                  管理员
-                </>
-              )}
-            </Button>
+            {adminButton}
             <Sheet>
               <SheetTrigger asChild>
                 <Button variant="outline" size="icon">
                   <Menu className="h-5 w-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="w-64 p-0">
-                <div className="p-6 border-b border-border">
-                  <h2 className="text-xl font-bold text-foreground">导航菜单</h2>
+              <SheetContent side="left" className="w-72 border-white/70 bg-white/95 p-0">
+                <div className="border-b border-border p-5">
+                  <h2 className="text-xl font-bold text-slate-900">导航菜单</h2>
+                  <p className="mt-1 text-sm text-slate-500">快速进入常用工作流</p>
                 </div>
-                {isAdmin && (
-                  <nav className="p-4 space-y-2 border-b border-border">
-                    <ActionLinks />
-                  </nav>
-                )}
-                <nav className="p-4 space-y-2">
-                  <NavLinks />
-                </nav>
+                {isAdmin && <nav className="space-y-2 border-b border-border p-4">{renderLinks(actionItems)}</nav>}
+                <nav className="space-y-2 p-4">{renderLinks(navItems)}</nav>
               </SheetContent>
             </Sheet>
           </div>
         </div>
       </div>
 
-      {/* 主内容区 */}
-      <main className="flex-1 lg:pt-0 pt-16 overflow-y-auto overflow-x-hidden min-w-0">
-        {children}
-      </main>
+      <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden pt-16 lg:pt-0">{children}</main>
     </div>
   );
 };

@@ -1,13 +1,54 @@
-import React, { useEffect, useState, useRef } from 'react';
+import Lightfall from '@/components/Lightfall';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import MainLayout from '@/components/layouts/MainLayout';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Upload, FolderTree, Settings, FileText, Database, ArrowRight, ChevronRight } from 'lucide-react';
-import { supabase } from '@/db/supabase';
-import type { FileWithCategories } from '@/types';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+import {
+ ArrowRight,
+  Eye,
+ ChevronRight,
+  Database,
+  FileText,
+  FolderTree,
+  Sparkles,
+  Upload,
+  Wand2,
+} from 'lucide-react';
+import MainLayout from '@/components/layouts/MainLayout';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { supabase } from '@/db/supabase';
+import type { FileWithCategories } from '@/types';
+
+const quickActions = [
+  {
+    title: '上传文件',
+    description: '添加图纸、图片与源文件',
+    icon: Upload,
+    path: '/upload',
+    surface: 'bg-emerald-100 text-emerald-700',
+  },
+  {
+    title: '分类浏览',
+    description: '按层级快速定位资源',
+    icon: FolderTree,
+    path: '/categories',
+    surface: 'bg-cyan-100 text-cyan-700',
+  },
+  {
+    title: '分类管理',
+    description: '维护资料库目录结构',
+    icon: Wand2,
+    path: '/manage',
+    surface: 'bg-pink-100 text-pink-700',
+  },
+];
+
+const popularCategories = [
+  { name: '油漆', icon: Sparkles, color: 'bg-yellow-100 text-yellow-700' },
+  { name: '文件', icon: FolderTree, color: 'bg-cyan-100 text-cyan-700' },
+  { name: '胶板', icon: Database, color: 'bg-emerald-100 text-emerald-700' },
+];
 
 const HomePage: React.FC = () => {
   const [recentFiles, setRecentFiles] = useState<FileWithCategories[]>([]);
@@ -16,47 +57,48 @@ const HomePage: React.FC = () => {
 
   useEffect(() => {
     isMounted.current = true;
+
+    const fetchRecentFiles = async () => {
+      try {
+        setLoading(true);
+        const { data: filesData, error } = await supabase
+          .from('files')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(4);
+
+        if (error) throw error;
+
+        const { data: categoriesData } = await supabase.from('categories').select('*');
+        const categoriesMap = new Map((categoriesData || []).map((category) => [category.id, category]));
+
+        const filesWithCategories: FileWithCategories[] = (filesData || []).map((file) => {
+          const category = categoriesMap.get(file.category_id);
+          return {
+            ...file,
+            category,
+            categoryPath: category ? [category.name] : [],
+          };
+        });
+
+        if (isMounted.current) {
+          setRecentFiles(filesWithCategories);
+        }
+      } catch (error) {
+        console.error('获取最近文件失败', error);
+      } finally {
+        if (isMounted.current) {
+          setLoading(false);
+        }
+      }
+    };
+
     fetchRecentFiles();
 
     return () => {
       isMounted.current = false;
     };
   }, []);
-
-  const fetchRecentFiles = async () => {
-    try {
-      setLoading(true);
-      const { data: filesData, error } = await supabase
-        .from('files')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(4);
-
-      if (error) throw error;
-
-      const { data: categoriesData } = await supabase.from('categories').select('*');
-      const categoriesMap = new Map((categoriesData || []).map(c => [c.id, c]));
-
-      const filesWithCategories: FileWithCategories[] = (filesData || []).map(file => {
-        const category = categoriesMap.get(file.category_id);
-        return {
-          ...file,
-          category,
-          categoryPath: category ? [category.name] : [],
-        };
-      });
-
-      if (isMounted.current) {
-        setRecentFiles(filesWithCategories);
-      }
-    } catch (err) {
-      console.error('获取最近文件失败:', err);
-    } finally {
-      if (isMounted.current) {
-        setLoading(false);
-      }
-    }
-  };
 
   const formatDate = (dateString: string) => {
     try {
@@ -66,113 +108,95 @@ const HomePage: React.FC = () => {
     }
   };
 
-  const quickActions = [
-    {
-      title: '上传文件',
-      description: '上传新的图纸或技术文件',
-      icon: Upload,
-      path: '/upload',
-      gradient: 'from-blue-500 to-blue-600',
-    },
-    {
-      title: '分类浏览',
-      description: '浏览所有分类和文件',
-      icon: FolderTree,
-      path: '/categories',
-      gradient: 'from-indigo-500 to-indigo-600',
-    },
-    {
-      title: '分类管理',
-      description: '管理文件分类结构',
-      icon: Settings,
-      path: '/manage',
-      gradient: 'from-violet-500 to-violet-600',
-    },
-  ];
-
-  const popularCategories = [
-    { name: '油漆', icon: FileText },
-    { name: '文件柜', icon: FolderTree },
-    { name: '胶板', icon: Database },
-  ];
-
   return (
     <MainLayout>
-      <div className="container mx-auto px-4 py-8 space-y-8">
-        {/* 顶部标题区 */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-8 lg:p-12">
-          <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0YzAtMS4xLS45LTItMi0ycy0yIC45LTIgMiAuOSAyIDIgMm0yIDBoNHYtNGgtNHY0em0wLTE2aDR2LTRoLTR2NHoiLz48L2c+PC9nPjwvc3ZnPg==')] opacity-50"></div>
-          
-          <div className="relative z-10 text-center">
-            <h1 className="text-4xl lg:text-5xl font-bold text-white mb-4 tracking-tight">
-              中泰技术组数据库
-            </h1>
+      <div className="min-h-full px-4 py-5 lg:px-8 lg:py-7">
+        <section className="relative flex flex-col justify-center overflow-hidden rounded-[2rem] border border-white/10 bg-black px-5 py-16 shadow-[0_14px_36px_rgb(15_23_42/0.18)] md:px-10 md:py-20">
+          <div className="absolute inset-0 opacity-100">
+            <Lightfall
+              className="h-full w-full"
+              colors={['#ff2e71', '#00d9ff', '#6366f1']}
+              backgroundColor="#000000"
+              speed={0.3}
+              streakCount={3}
+              streakWidth={0.15}
+              streakLength={0.4}
+              glow={1.2}
+              density={0.5}
+              twinkle={0.8}
+              zoom={1.4}
+              backgroundGlow={0}
+              mouseInteraction
+              mouseStrength={0.3}
+              mouseRadius={0.08}
+            />
           </div>
-        </div>
 
-        {/* 快速功能入口 */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {quickActions.map((action) => {
-            const Icon = action.icon;
-            return (
-              <Link key={action.path} to={action.path} className="group">
-                <Card className="h-full transition-all duration-300 hover:shadow-lg hover:-translate-y-1 border-slate-200">
-                  <CardHeader className="pb-4">
-                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${action.gradient} flex items-center justify-center mb-3`}>
-                      <Icon className="h-6 w-6 text-white" />
-                    </div>
-                    <CardTitle className="text-lg font-semibold text-slate-800">{action.title}</CardTitle>
-                    <CardDescription className="text-slate-500">{action.description}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <Button variant="outline" className="w-full group-hover:bg-slate-50 transition-colors">
-                      立即前往
-                      <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                    </Button>
-                  </CardContent>
-                </Card>
-              </Link>
-            );
-          })}
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* 最近访问文件 */}
-          <div className="lg:col-span-2">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-slate-800">最近上传</h2>
-              <Link to="/categories">
-                <Button variant="ghost" size="sm" className="text-slate-500 hover:text-slate-700">
-                  查看全部
-                  <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-              </Link>
+          <div className="relative z-10">
+            <div>
+              <h1 className="mx-auto max-w-3xl text-center text-3xl font-bold leading-tight text-white sm:text-4xl md:text-6xl">
+                中泰技术组数据库              </h1>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          </div>
+        </section>
+
+        <div className="mt-7 grid grid-cols-1 gap-6 xl:grid-cols-[1fr_360px]">
+          <section>
+            <div className="mb-7 grid grid-cols-1 gap-5 sm:grid-cols-3">
+              {quickActions.map((action) => {
+                const Icon = action.icon;
+                return (
+                  <Link key={action.path} to={action.path} className="float-soft block transition-all duration-200 hover:-translate-y-0.5">
+                    <Card className="h-full overflow-hidden border-slate-200/70 shadow-[0_2px_8px_rgb(0_0_0/0.04)] transition-shadow duration-200 hover:shadow-[0_4px_16px_rgb(0_0_0/0.10)]">
+                      <CardContent className="flex items-center gap-4 p-5">
+                        <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${action.surface}`}>
+                          <Icon className="h-6 w-6" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold text-slate-900">{action.title}</p>
+                          <p className="mt-1 text-sm leading-snug text-slate-500">{action.description}</p>
+                        </div>
+                        <ChevronRight className="h-5 w-5 shrink-0 text-slate-300 transition-colors duration-200 group-hover:text-slate-500" />
+                      </CardContent>
+                    </Card>
+                  </Link>
+                );
+              })}
+            </div>
+
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-950">最近上传</h2>
+                <p className="mt-1 text-sm text-slate-500">最新进入资料库的图纸与文件</p>
+              </div>
+              <Button asChild variant="ghost" size="sm">
+                <Link to="/categories">
+                  查看全部
+                  <ChevronRight className="h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {loading ? (
-                Array.from({ length: 4 }).map((_, i) => (
-                  <Card key={i} className="overflow-hidden">
-                    <div className="h-32 bg-slate-100 animate-pulse"></div>
-                    <CardHeader className="pb-2">
-                      <div className="h-4 bg-slate-100 rounded w-3/4 animate-pulse mb-2"></div>
-                      <div className="h-3 bg-slate-100 rounded w-1/2 animate-pulse"></div>
+                Array.from({ length: 4 }).map((_, index) => (
+                  <Card key={index} className="overflow-hidden">
+                    <div className="h-36 animate-pulse bg-cyan-50" />
+                    <CardHeader className="pb-3">
+                      <div className="mb-2 h-4 w-3/4 animate-pulse rounded-full bg-slate-100" />
+                      <div className="h-3 w-1/2 animate-pulse rounded-full bg-slate-100" />
                     </CardHeader>
                   </Card>
                 ))
               ) : recentFiles.length > 0 ? (
                 recentFiles.map((file) => (
-                  <Card key={file.id} className="overflow-hidden hover:shadow-md transition-shadow group">
-                    <div className="h-32 bg-slate-100 relative">
-                      <img
-                        src={file.image_url}
-                        alt={file.name}
-                        className="w-full h-full object-contain"
-                        loading="lazy"
-                      />
+                  <Card key={file.id} className="float-soft overflow-hidden">
+                    <div className="relative h-36 bg-white/75 p-3">
+                      <img src={file.image_url} alt={file.name} className="h-full w-full object-contain" loading="lazy" />
                     </div>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium line-clamp-1">{file.name}</CardTitle>
+                    <CardHeader className="pb-4">
+                      <CardTitle className="line-clamp-1 text-sm font-bold text-slate-900">{file.name}</CardTitle>
                       <CardDescription className="text-xs">
                         {file.categoryPath?.[0] || '未分类'} · {formatDate(file.created_at)}
                       </CardDescription>
@@ -181,52 +205,47 @@ const HomePage: React.FC = () => {
                 ))
               ) : (
                 <Card className="col-span-full">
-                  <CardContent className="py-8 text-center text-slate-500">
-                    <FileText className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+                  <CardContent className="py-10 text-center text-slate-500">
+                    <FileText className="mx-auto mb-3 h-12 w-12 text-cyan-300" />
                     <p>暂无文件记录</p>
-                    <Link to="/upload">
-                      <Button className="mt-4">上传第一个文件</Button>
-                    </Link>
+                    <Button asChild className="mt-4">
+                      <Link to="/upload">上传第一个文件</Link>
+                    </Button>
                   </CardContent>
                 </Card>
               )}
             </div>
-          </div>
+          </section>
 
-          {/* 常用分类 */}
-          <div>
-            <h2 className="text-xl font-semibold text-slate-800 mb-4">常用分类</h2>
-            <Card>
-              <CardContent className="p-0">
-                <div className="divide-y divide-slate-200">
+          <Card className="h-full">
+            <CardHeader className="pb-0">
+              <CardTitle className="text-2xl font-bold text-slate-950">常用分类</CardTitle>
+            </CardHeader>
+            <CardContent className="p-3 pt-2">
+                <div className="space-y-2">
                   {popularCategories.map((category) => {
                     const Icon = category.icon;
                     return (
                       <Link
                         key={category.name}
                         to="/categories"
-                        className="flex items-center gap-3 p-4 hover:bg-slate-50 transition-colors group"
+                        className="float-soft flex items-center gap-3 rounded-[1.25rem] p-3 hover:bg-white/80"
                       >
-                        <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
-                          <Icon className="h-5 w-5 text-blue-600" />
+                        <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${category.color}`}>
+                          <Icon className="h-6 w-6" />
                         </div>
-                        <div className="flex-1">
-                          <p className="font-medium text-slate-800">{category.name}</p>
-                        </div>
-                        <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-slate-600 group-hover:translate-x-1 transition-all" />
+                        <p className="flex-1 font-semibold text-slate-900">{category.name}</p>
+                        <ChevronRight className="h-5 w-5 shrink-0 text-slate-300 transition-colors duration-200 group-hover:text-slate-500" />
                       </Link>
                     );
                   })}
-                  <Link
-                    to="/categories"
-                    className="flex items-center justify-center p-4 text-sm text-blue-600 hover:bg-slate-50 transition-colors font-medium"
-                  >
-                    浏览全部分类
-                  </Link>
+                  <Button asChild variant="outline" className="mt-2 w-full">
+                    <Link to="/categories">浏览全部分类</Link>
+                  </Button>
                 </div>
               </CardContent>
             </Card>
-          </div>
+
         </div>
       </div>
     </MainLayout>

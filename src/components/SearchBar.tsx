@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 interface SearchBarProps {
   onSearch: (keyword: string) => void;
@@ -10,50 +10,48 @@ interface SearchBarProps {
 
 const SearchBar: React.FC<SearchBarProps> = ({ onSearch, placeholder = '搜索文件名称...' }) => {
   const [keyword, setKeyword] = useState('');
+  const onSearchRef = useRef(onSearch);
+
+  useEffect(() => {
+    onSearchRef.current = onSearch;
+  }, [onSearch]);
 
   const handleSearch = useCallback(() => {
-    onSearch(keyword.trim());
-  }, [keyword, onSearch]);
+    onSearchRef.current(keyword.trim());
+  }, [keyword]);
 
   const handleClear = useCallback(() => {
     setKeyword('');
-    onSearch('');
-  }, [onSearch]);
+    onSearchRef.current('');
+  }, []);
 
-  const handleKeyPress = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      handleSearch();
-    }
-  }, [handleSearch]);
-
-  // 防抖搜索 - 300ms延迟
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (keyword) {
-        onSearch(keyword.trim());
-      }
+      onSearchRef.current(keyword.trim());
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [keyword, onSearch]);
+  }, [keyword]);
 
   return (
-    <div className="flex gap-2 w-full max-w-2xl">
+    <div className="flex w-full max-w-2xl gap-2">
       <div className="relative flex-1">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           type="text"
           placeholder={placeholder}
           value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onKeyPress={handleKeyPress}
-          className="pl-10 pr-10"
+          onChange={(event) => setKeyword(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') handleSearch();
+          }}
+          className="pl-11 pr-11"
         />
         {keyword && (
           <Button
             variant="ghost"
             size="icon"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+            className="absolute right-1 top-1/2 h-9 w-9 -translate-y-1/2"
             onClick={handleClear}
           >
             <X className="h-4 w-4" />
